@@ -81,6 +81,13 @@ export interface TitleCallbacks {
   onHangar(): void
 }
 
+/** Something the flight just unlocked, resolved to a display name by the caller. */
+export interface UnlockedItem {
+  readonly id: string
+  readonly name: string
+  readonly kind: 'aircraft' | 'upgrade'
+}
+
 export interface ResultsModel {
   readonly score: FlightScore
   readonly route: Route
@@ -89,7 +96,7 @@ export interface ResultsModel {
   /** Encoded ghost of this flight, for "Beat my run" sharing. */
   readonly ghostCode: string
   readonly previousBest: { readonly smooth: number; readonly speed: number; readonly eco: number } | null
-  readonly newlyUnlocked: readonly string[]
+  readonly newlyUnlocked: readonly UnlockedItem[]
 }
 
 /** aircraftId → human hint for locked aircraft ("2 more flights", "Smooth score 450 needed"). Absent = unlocked. */

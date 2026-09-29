@@ -1,6 +1,6 @@
 // App shell: title → flight → results, hangar. Owns persistence and wiring, no game rules.
 import type { AircraftSpec, AircraftState, Ghost, PlayerProgress } from '../core/types'
-import { AIRCRAFT, aircraftById, flightModel } from '../flight'
+import { AIRCRAFT, aircraftById } from '../flight'
 import { createFlowLayer } from '../flow'
 import {
   UPGRADES,
@@ -17,6 +17,8 @@ import {
   weatherParamsFor,
 } from '../meta'
 import { createAudio } from '../audio'
+import { createAutopilot, STRATEGIES, type Autopilot, type Strategy } from '../bot'
+import type { UnlockedItem } from '../core/presentation'
 import { createWorldView } from '../render'
 import { ghostCodec } from '../scoring'
 import { createHud, createInput, createScreens } from '../ui'
@@ -27,8 +29,11 @@ const GHOST_COLORS = ['#f4b860', '#8ec5ff', '#c9a7ff']
 
 /** Outside a flight the sky keeps moving around a parked aircraft (`backdrop`). */
 type Mode =
-  | { readonly kind: 'flying'; readonly session: FlightSession }
-  | { readonly kind: 'title' | 'results'; readonly backdrop: AircraftState }
+  /** autopilot: dev fast-check (?autopilot=). timeScale: dev fast-forward (?speed=). */
+  | { readonly kind: 'flying'; readonly session: FlightSession; readonly autopilot: Autopilot | null; readonly timeScale: number }
+  /** The title screen's sky is a real flight flown by the surfer bot: the game demonstrates itself. */
+  | { readonly kind: 'title'; readonly demo: FlightSession; readonly autopilot: Autopilot }
+  | { readonly kind: 'results'; readonly backdrop: AircraftState }
 
 export function startApp(root: HTMLElement): void {
   const canvas = document.createElement('canvas')
@@ -73,10 +78,17 @@ export function startApp(root: HTMLElement): void {
 
   let mode: Mode
 
-  const showTitle = (): void => {
-    hud.setVisible(false)
-    audio.setScene('menu')
-    const route = today.routes[0]
+  const describeUnlock = (id: string): UnlockedItem => {
+    const aircraft = AIRCRAFT.find((a) => a.id === id)
+    if (aircraft) return { id, name: aircraft.name, kind: 'aircraft' }
+    const upgrade = UPGRADES.find((u) => u.id === id)
+    if (upgrade) return { id, name: upgrade.name, kind: 'upgrade' }
+    throw new Error(`Unknown unlock id ${id}`)
+  }
+
+  /** Today's most dramatic sky, flown by the surfer bot in the player's first aircraft. Restarts when it lands. */
+  const startDemo = (): void => {
+    const route = today.routes[2]
     const spec = specFor(progress.unlockedAircraft[0] ?? AIRCRAFT[0]!.id)
     const weather = createWeather(weatherParamsFor(today, route))
     world.setWeather(weather)
@@ -84,7 +96,14 @@ export function startApp(root: HTMLElement): void {
     world.setRoute(route)
     world.setAircraft(spec, liveryOf(spec.id))
     world.setGhosts([])
-    mode = { kind: 'title', backdrop: flightModel.initialState(spec, route, weather) }
+    const demo = createFlightSession({ daily: today, route, spec, weather, pilot: 'demo', ghosts: [] })
+    mode = { kind: 'title', demo, autopilot: createAutopilot('surfer', spec, route, weather) }
+  }
+
+  const showTitle = (): void => {
+    hud.setVisible(false)
+    audio.setScene('menu')
+    startDemo()
     screens.showTitle(today, progress, AIRCRAFT, unlockHints(progress), {
       onFly: (routeId, aircraftId, ghostCode) => fly(routeId, aircraftId, decodeGhost(ghostCode)),
       onHangar: showHangar,
@@ -110,13 +129,15 @@ export function startApp(root: HTMLElement): void {
   }
 
   /** A friend's ghost carries its own day: fly that day's sky and route so the race is fair. */
-  const fly = (routeId: string, aircraftId: string, friendGhost: Ghost | null): void => {
+  const fly = (routeId: string, aircraftId: string, friendGhost: Ghost | null, dev?: { autopilot: Strategy | null; timeScale: number }): void => {
     const daily = friendGhost ? dailyWeatherFor(friendGhost.dailyNumber) : today
     const route = daily.routes.find((r) => r.id === (friendGhost?.routeId ?? routeId))
     if (!route) throw new Error(`Route ${routeId} not found in WORLD WEATHER #${daily.number}`)
     const spec = specFor(aircraftId)
     const weather = createWeather(weatherParamsFor(daily, route))
-    const localBest = decodeGhost(store.bestGhost(daily.number, route.id, 'speed'))
+    const localCode = store.bestGhost(daily.number, route.id, 'speed')
+    // Racing your own shared link: the friend ghost and the local best are the same flight.
+    const localBest = localCode && (!friendGhost || ghostCodec.encode(friendGhost) !== localCode) ? decodeGhost(localCode) : null
     const ghosts = [friendGhost, localBest].filter((g): g is Ghost => g !== null)
 
     world.setWeather(weather)
@@ -128,7 +149,9 @@ export function startApp(root: HTMLElement): void {
     screens.hide()
     hud.setVisible(true)
     audio.setScene('flight')
-    mode = { kind: 'flying', session: createFlightSession({ daily, route, spec, weather, pilot: progress.pilot, ghosts }) }
+    const session = createFlightSession({ daily, route, spec, weather, pilot: progress.pilot, ghosts })
+    const autopilot = dev?.autopilot ? createAutopilot(dev.autopilot, spec, route, weather) : null
+    mode = { kind: 'flying', session, autopilot, timeScale: dev?.timeScale ?? 1 }
   }
 
   const finish = (session: FlightSession, outcome: NonNullable<ReturnType<FlightSession['advance']>>): void => {
@@ -151,7 +174,7 @@ export function startApp(root: HTMLElement): void {
     else if (beat) audio.cue('record')
     mode = { kind: 'results', backdrop: session.state() }
     screens.showResults(
-      { score: outcome.score, route, dailyNumber: daily.number, aircraft: spec, ghostCode: outcome.ghostCode, previousBest, newlyUnlocked: recorded.newlyUnlocked },
+      { score: outcome.score, route, dailyNumber: daily.number, aircraft: spec, ghostCode: outcome.ghostCode, previousBest, newlyUnlocked: recorded.newlyUnlocked.map(describeUnlock) },
       { onRetry: () => fly(route.id, spec.id, session.setup.ghosts[0] ?? null), onMenu: showTitle },
     )
   }
@@ -171,7 +194,8 @@ export function startApp(root: HTMLElement): void {
     last = now
     if (mode.kind === 'flying') {
       const session = mode.session
-      const outcome = session.advance(dtReal, input.read())
+      const controls = input.read()
+      const outcome = session.advance(dtReal * mode.timeScale, mode.autopilot ?? controls)
       hud.update(session.hud())
       const air = session.air()
       const s = session.state()
@@ -191,6 +215,12 @@ export function startApp(root: HTMLElement): void {
       world.update({ state: session.state(), ghostPoses: session.ghostPoses(), dtReal })
       flow.update(world.camera, session.state().t, dtReal)
       if (outcome) finish(session, outcome)
+    } else if (mode.kind === 'title') {
+      input.read()
+      if (mode.demo.advance(dtReal, mode.autopilot)) startDemo()
+      const s = mode.demo.state()
+      world.update({ state: s, ghostPoses: [], dtReal })
+      flow.update(world.camera, s.t, dtReal)
     } else {
       titleT += dtReal
       input.read()
@@ -211,6 +241,7 @@ export function startApp(root: HTMLElement): void {
   /**
    * Dev-only deep link so agents/screenshots reach real in-game states without menus:
    * ?fly=0|1|2 (route index) &aircraft=<id> &at=x,y,z (teleport, meters) &hud=0
+   * &autopilot=direct|surfer|eco|reckless (bot flies) &speed=N (sim fast-forward, capped by the session's per-frame clamp)
    * window.__wr exposes the live session for eval-driven checks.
    */
   function debugDeepLink(): void {
@@ -218,7 +249,8 @@ export function startApp(root: HTMLElement): void {
     const routeIndex = q.get('fly')
     if (routeIndex === null) return
     const route = today.routes[Number(routeIndex)] ?? today.routes[0]
-    fly(route.id, q.get('aircraft') ?? AIRCRAFT[0]!.id, null)
+    const autopilot = STRATEGIES.find((s) => s === q.get('autopilot')) ?? null
+    fly(route.id, q.get('aircraft') ?? AIRCRAFT[0]!.id, null, { autopilot, timeScale: Math.max(1, Number(q.get('speed') ?? 1)) })
     if (mode.kind !== 'flying') return
     const at = q.get('at')?.split(',').map(Number)
     if (at && at.length === 3 && at.every(Number.isFinite)) mode.session.teleport({ x: at[0]!, y: at[1]!, z: at[2]! })

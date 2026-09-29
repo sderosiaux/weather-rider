@@ -1,6 +1,6 @@
 import type { ResultsModel } from '../../core/presentation'
 import { h } from '../dom'
-import { flightTime, humanizeId, recordState, shareUrl, type RecordState } from '../format'
+import { flightTime, recordState, shareUrl, type RecordState } from '../format'
 import { skyLine } from '../coach/sky'
 import { boardName } from '../tradeoffs'
 
@@ -40,7 +40,6 @@ const copy = async (text: string): Promise<boolean> => {
 export const renderResults = (
   m: ResultsModel,
   cb: { onRetry(): void; onMenu(): void },
-  nameOf: (id: string) => string | null,
 ): HTMLElement => {
   const s = m.score
   const ok = s.status === 'arrived'
@@ -84,7 +83,7 @@ export const renderResults = (
           'div',
           'wr-unlocked',
           h('h2', 'wr-sheet__title', 'Unlocked in the hangar'),
-          h('ul', 'wr-unlocked__list', m.newlyUnlocked.map((id) => h('li', {}, nameOf(id) ?? humanizeId(id)))),
+          h('ul', 'wr-unlocked__list', m.newlyUnlocked.map((u) => h('li', {}, u.name))),
         )
       : null
 

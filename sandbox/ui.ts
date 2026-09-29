@@ -98,7 +98,7 @@ const results = (status: 'arrived' | 'crashed'): ResultsModel => ({
   aircraft: aircraft[0]!,
   ghostCode: 'v1.eJyrVkrOz0nNzUxRslIqSk1LLUrNS1ayUjI0MjIwMlCqBQCjFwk9',
   previousBest: veteran.best,
-  newlyUnlocked: status === 'arrived' ? ['widebody', 'gust-probe'] : [],
+  newlyUnlocked: status === 'arrived' ? [{ id: 'widebody', name: 'Albatross 350', kind: 'aircraft' }, { id: 'gust-probe', name: 'Gust probe', kind: 'upgrade' }] : [],
 })
 
 // Mirrors what meta.unlockHints produces: absent = unlocked.

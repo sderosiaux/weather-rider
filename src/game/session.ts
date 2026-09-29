@@ -42,8 +42,11 @@ export interface FlightOutcome {
 export interface FlightSession {
   readonly setup: FlightSetup
   state(): AircraftState
-  /** Advance the sim by wall-clock dt. Returns the outcome once the flight ended. */
-  advance(dtReal: number, controls: Controls): FlightOutcome | null
+  /**
+   * Advance the sim by wall-clock dt. Returns the outcome once the flight ended.
+   * `pilot` is either the player's controls for this frame or a per-step autopilot.
+   */
+  advance(dtReal: number, pilot: Controls | ((state: AircraftState) => Controls)): FlightOutcome | null
   hud(): HudModel
   /** Air at the aircraft now. Reused object: read it, don't keep it. */
   air(): WeatherSample
@@ -74,11 +77,11 @@ export function createFlightSession(setup: FlightSetup): FlightSession {
   return {
     setup,
     state: () => state,
-    advance(dtReal, controls) {
+    advance(dtReal, pilot) {
       if (outcome) return outcome
       acc += Math.min(dtReal, MAX_FRAME_S)
       while (acc >= SIM_DT && state.status === 'flying') {
-        stepOnce(controls)
+        stepOnce(typeof pilot === 'function' ? pilot(state) : pilot)
         acc -= SIM_DT
       }
       if (state.status !== 'flying') {

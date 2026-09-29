@@ -51,7 +51,7 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
     },
     showResults(model, cb) {
       names.set(model.aircraft.id, model.aircraft.name)
-      mount(renderResults(model, cb, (id) => names.get(id) ?? null), '.wr-actions .wr-btn--primary', cb.onMenu)
+      mount(renderResults(model, cb), '.wr-actions .wr-btn--primary', cb.onMenu)
     },
     showHangar(model, cb) {
       for (const a of model.aircraft) names.set(a.id, a.name)
