@@ -102,6 +102,18 @@ export interface Layout {
 }
 
 const TAU = Math.PI * 2
+/** Horizontal reach of a column's influence, in radii. Must match the sampler's kernels. */
+export const COLUMN_REACH = 1.6
+/** Storm reach: the anvil is centred 0.9 R downwind with a 3.4 R semi-axis. */
+export const STORM_REACH = 4.35
+/** Storm core radius, in radii (violent turbulence inside). */
+export const STORM_CORE = 0.6
+/** From this severity a storm core sits on the straight start→gate line. */
+const BLOCK_LINE_SEVERITY = 0.6
+/** Below this severity every storm core stays clear of the straight line. */
+const CLEAR_LINE_SEVERITY = 0.45
+/** Clearance between the straight line and a storm core edge on calm days (m). */
+const LINE_MARGIN = 3500
 const BG_K1 = TAU / 140_000
 const BG_K2 = TAU / 90_000
 const BG_K3 = TAU / 60_000
@@ -189,16 +201,21 @@ export function generateLayout(params: WeatherParams): Layout {
   const features: WeatherFeature[] = []
   const lift = liftScale(sev)
 
-  // Footprints of placed big columns: overlapping lift would stack into unflyable 50 m/s columns.
+  // Footprints of placed columns: overlapping columns would stack their vertical wind
+  // (50 m/s towers at severity 1, a 6 m/s "calm" day at severity 0).
   const placed: [number, number, number][] = []
+  const clearance = (c: readonly [number, number], footprint: number) => {
+    let clear = Infinity
+    for (const [px, pz, pr] of placed) clear = Math.min(clear, Math.hypot(c[0] - px, c[1] - pz) - pr - footprint)
+    return clear
+  }
   /** Best of a few candidates from `pick`, maximizing clearance to already placed columns. */
   const place = (pick: () => [number, number], footprint: number): [number, number] => {
     let best: [number, number] = pick()
     let bestClear = -Infinity
-    for (let attempt = 0; attempt < 12; attempt++) {
+    for (let attempt = 0; attempt < 16; attempt++) {
       const c = attempt === 0 ? best : pick()
-      let clear = Infinity
-      for (const [px, pz, pr] of placed) clear = Math.min(clear, Math.hypot(c[0] - px, c[1] - pz) - pr - footprint)
+      const clear = clearance(c, footprint)
       if (clear > bestClear) {
         best = c
         bestClear = clear
@@ -208,13 +225,30 @@ export function generateLayout(params: WeatherParams): Layout {
     placed.push([best[0], best[1], footprint])
     return best
   }
+  /** Like `place`, but gives up (null) rather than overlap anything. */
+  const placeStrict = (pick: () => [number, number], footprint: number): [number, number] | null => {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const c = pick()
+      if (clearance(c, footprint) >= 0) {
+        placed.push([c[0], c[1], footprint])
+        return c
+      }
+    }
+    return null
+  }
+  /** Horizontal distance from (x, z) to the straight start→gate segment. */
+  const distToLine = (x: number, z: number) => {
+    const along = clamp((x - fr.ax) * fr.ux + (z - fr.az) * fr.uz, 0, fr.len)
+    return Math.hypot(x - (fr.ax + fr.ux * along), z - (fr.az + fr.uz * along))
+  }
 
   const pushColumn = (spec: Omit<ColumnSpec, 'reach' | 'yMin' | 'yMax'>, id: string) => {
     const isStorm = spec.kind === STORM
     const col: ColumnSpec = {
       ...spec,
-      reach: isStorm ? spec.radius * 3.25 : spec.radius * 1.6,
-      yMin: spec.base - (isStorm ? 1500 : 500) - (spec.kind === THERMAL ? 400 : 0),
+      reach: spec.radius * (isStorm ? STORM_REACH : COLUMN_REACH),
+      // Storm rear downdraft and inflow reach the ground (and stay continuous below it).
+      yMin: isStorm ? -Infinity : spec.base - 500 - (spec.kind === THERMAL ? 400 : 0),
       yMax: spec.top + (isStorm ? 1500 : 800),
     }
     columns.push(col)
@@ -225,13 +259,31 @@ export function generateLayout(params: WeatherParams): Layout {
   }
 
   // ── Storms: biased along the corridor, count and strength scale with severity.
+  // The straight line is a routing decision: rough days put a storm core on it (flying straight
+  // has a real cost), calm-ish days keep every core clear of it.
   const rs = rngFor(0x5707)
   const nearStorms = sev < 0.1 ? 0 : Math.round(sev * 4 + rs() * 1.5)
   const farStorms = Math.floor(sev * 3 * rs())
+  const blockLine = sev >= BLOCK_LINE_SEVERITY
+  const avoidLine = sev < CLEAR_LINE_SEVERITY
   for (let i = 0; i < nearStorms + farStorms; i++) {
     const near = i < nearStorms
-    const radius = 3000 + 3500 * rs() * (0.6 + 0.4 * sev)
-    const [cx, cz] = place(() => (near ? onCorridor(0.12 + (0.76 * (i + rs())) / nearStorms, (rs() * 2 - 1) * 14_000) : anywhere(rs)), radius * 1.3)
+    const radius = 3500 + 4000 * rs() * (0.5 + 0.5 * sev)
+    // Keep the core (0.6 R) plus a margin off the straight line.
+    const lineClear = STORM_CORE * radius + LINE_MARGIN
+    const side = () => (rs() < 0.5 ? -1 : 1)
+    const pick = (): [number, number] => {
+      if (blockLine && i === 0) return onCorridor(0.25 + 0.5 * rs(), (rs() * 2 - 1) * 0.15 * radius)
+      if (avoidLine) return onCorridor(near ? 0.12 + (0.76 * (i + rs())) / nearStorms : rs(), side() * (lineClear + rs() * (near ? 9000 : 18_000)))
+      return near ? onCorridor(0.12 + (0.76 * (i + rs())) / nearStorms, (rs() * 2 - 1) * 14_000) : anywhere(rs)
+    }
+    let [cx, cz] = place(pick, radius * 1.3)
+    // Bounds clamping can pull an avoiding storm back toward the line: push it out along the normal.
+    if (avoidLine && distToLine(cx, cz) < lineClear) {
+      const lat = (cz - fr.az) * fr.ux - (cx - fr.ax) * fr.uz
+      const along = ((cx - fr.ax) * fr.ux + (cz - fr.az) * fr.uz) / fr.len
+      ;[cx, cz] = onCorridor(along, (lat < 0 ? -1 : 1) * lineClear)
+    }
     const flank = rs() * TAU
     const [wx, wz] = upperWind(cx, cz)
     pushColumn(
@@ -241,7 +293,8 @@ export function generateLayout(params: WeatherParams): Layout {
         cz,
         radius,
         base: 600 + 800 * rs(),
-        top: Math.min(ceiling, 9500 + 3500 * sev * rs()),
+        // Cumulonimbus tops: ≈10 km on mild days, 11–13.5 km (anvil at the ceiling) when extreme.
+        top: Math.min(ceiling, lerp(9500, 11_000, sev) + 2600 * sev * rs()),
         strength: (12 + 16 * sev) * (0.85 + 0.3 * rs()),
         intensity: 0.65 + 0.35 * sev,
         flankX: Math.cos(flank),
@@ -261,7 +314,7 @@ export function generateLayout(params: WeatherParams): Layout {
   for (let i = 0; i < nLift + nExtra; i++) {
     const guaranteed = i < nLift
     const radius = 1800 + 1700 * ru()
-    const [cx, cz] = place(() => (guaranteed ? onCorridor(0.1 + (0.8 * (i + ru())) / nLift, (ru() * 2 - 1) * 9000) : anywhere(ru)), radius * 1.4)
+    const [cx, cz] = place(() => (guaranteed ? onCorridor(0.1 + (0.8 * (i + ru())) / nLift, (ru() * 2 - 1) * 9000) : anywhere(ru)), radius * COLUMN_REACH)
     pushColumn(
       {
         kind: UPDRAFT,
@@ -287,7 +340,7 @@ export function generateLayout(params: WeatherParams): Layout {
   const nSink = 1 + Math.round(sev * 4)
   for (let i = 0; i < nSink; i++) {
     const radius = 2000 + 2000 * rd()
-    const [cx, cz] = place(() => onCorridor(0.1 + 0.85 * rd(), (rd() * 2 - 1) * 20_000), radius * 1.4)
+    const [cx, cz] = place(() => onCorridor(0.1 + 0.85 * rd(), (rd() * 2 - 1) * 20_000), radius * COLUMN_REACH)
     pushColumn(
       {
         kind: DOWNDRAFT,
@@ -313,13 +366,17 @@ export function generateLayout(params: WeatherParams): Layout {
   const areaKm2 = ((fr.maxX - fr.minX) * (fr.maxZ - fr.minZ)) / 1e6
   const nThermals = Math.round(clamp(areaKm2 / 110, 20, 140))
   for (let i = 0; i < nThermals; i++) {
-    const [cx, cz] = anywhere(rt)
+    const radius = 500 + 800 * rt()
+    // Thermals never overlap anything: a thermal under an updraft would stack past "gentle".
+    const at = placeStrict(() => anywhere(rt), radius * COLUMN_REACH)
+    if (!at) continue
+    const [cx, cz] = at
     pushColumn(
       {
         kind: THERMAL,
         cx,
         cz,
-        radius: 500 + 800 * rt(),
+        radius,
         base: 0,
         top: 1300 + 1600 * rt(),
         strength: (1.2 + 1.2 * rt()) * (1 + 1.1 * sev),

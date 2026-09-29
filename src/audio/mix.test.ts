@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AudioFrame } from '../core/presentation'
 import type { AircraftClass } from '../core/types'
-import { computeMix, NEUTRAL_FRAME, VERTICAL_THRESHOLD_MS, type MixTargets } from './mix'
+import { computeMix, LAYER_CLOSE_AFTER_S, LAYERS, layersFor, NEUTRAL_FRAME, SMOOTHING, VERTICAL_THRESHOLD_MS, type Layer, type MixTargets } from './mix'
 import { ENGINE_VOICES, MENU_CHORD_S, MENU_CHORDS, menuChordIndex } from './voices'
 
 const cruise: AudioFrame = { ...NEUTRAL_FRAME, airspeedMs: 220, throttle: 0.6, turbulence: 0.1 }
@@ -141,5 +141,34 @@ describe('robustness', () => {
       }
       expect(m.windLevel + m.rumbleLevel + m.engineLevel + m.shimmerLevel + m.sinkLevel + m.jetPadLevel + m.stallLevel).toBeLessThan(1)
     }
+  })
+})
+
+describe('layer gating', () => {
+  const LEVEL: Record<Layer, (m: MixTargets) => number> = {
+    engine: (m) => m.engineLevel,
+    rumble: (m) => m.rumbleLevel,
+    shimmer: (m) => m.shimmerLevel,
+    sink: (m) => m.sinkLevel,
+    jetPad: (m) => m.jetPadLevel,
+    stall: (m) => m.stallLevel,
+    menuPad: (m) => m.menuPadLevel,
+  }
+  const loud: AudioFrame = { ...cruise, throttle: 1, turbulence: 1, dominant: 'jetstream', verticalWindMs: 20, stalled: true }
+  it('a layer disconnected in a scene is always silent in that scene, whatever the frame', () => {
+    for (const scene of ['menu', 'flight'] as const) {
+      const open = layersFor(scene)
+      for (const frame of [loud, { ...loud, verticalWindMs: -20, dominant: 'storm' as const }, NEUTRAL_FRAME]) {
+        const m = computeMix(frame, scene)
+        for (const layer of LAYERS) if (!open.has(layer)) expect(LEVEL[layer](m), `${scene}/${layer}`).toBe(0)
+      }
+    }
+  })
+  it('every layer is used by some scene, and menu keeps only the bed', () => {
+    for (const layer of LAYERS) expect(layersFor('menu').has(layer) || layersFor('flight').has(layer), layer).toBe(true)
+    expect([...layersFor('menu')]).toEqual(['menuPad'])
+  })
+  it('the old scene is disconnected only after its slowest fade is inaudible', () => {
+    for (const tau of Object.values(SMOOTHING)) expect(Math.exp(-LAYER_CLOSE_AFTER_S / tau)).toBeLessThan(1e-3)
   })
 })

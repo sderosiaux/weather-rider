@@ -4,12 +4,14 @@
 import type { AudioEngine, AudioFrame, CreateAudio } from '../core/presentation'
 import { CUES } from './cues'
 import { buildGraph, type AudioGraph } from './graph'
-import { computeMix, NEUTRAL_FRAME, SMOOTHING, type AudioScene } from './mix'
+
+export type { AudioGraph } from './graph'
+import { computeMix, LAYER_CLOSE_AFTER_S, layersFor, NEUTRAL_FRAME, SMOOTHING, type AudioScene } from './mix'
 import { MENU_CHORDS, menuChordIndex } from './voices'
 
 export interface AudioOptions {
   /** Called once the graph exists; `output` is the last node before the destination (for analysers). */
-  readonly onGraph?: (ctx: AudioContext, output: AudioNode) => void
+  readonly onGraph?: (ctx: AudioContext, output: AudioNode, graph: AudioGraph) => void
 }
 
 /** Parameter pushes per second; the graph smooths between them. */
@@ -26,6 +28,7 @@ export function createAudioWith(options: AudioOptions = {}): AudioEngine {
   let sinceApply = Infinity
   let chord = -1
   let chordTimer: ReturnType<typeof setInterval> | null = null
+  let closeTimer: ReturnType<typeof setTimeout> | null = null
   /** Context time until which levels keep the slow scene-change glide. */
   let transitionUntil = 0
 
@@ -36,6 +39,18 @@ export function createAudioWith(options: AudioOptions = {}): AudioEngine {
   }
   const startTransition = (): void => {
     if (ctx) transitionUntil = ctx.currentTime + 3 * SMOOTHING.scene
+  }
+
+  /** Connect the scene's layers now (they fade in), disconnect the others once they have faded out. */
+  const gateLayers = (immediate: boolean): void => {
+    if (!graph) return
+    const g = graph
+    const active = layersFor(scene)
+    g.openLayers(active)
+    if (closeTimer) clearTimeout(closeTimer)
+    closeTimer = null
+    if (immediate) g.closeLayersExcept(active)
+    else closeTimer = setTimeout(() => g.closeLayersExcept(active), LAYER_CLOSE_AFTER_S * 1000)
   }
 
   const tickMenuChord = (): void => {
@@ -55,11 +70,13 @@ export function createAudioWith(options: AudioOptions = {}): AudioEngine {
         ctx = new Ctor({ latencyHint: 'balanced' })
         graph = buildGraph(ctx)
         graph.setVolume(volume)
+        // Every level starts at 0, so the inactive scene's layers can be cut right away.
+        gateLayers(true)
         startTransition()
         apply()
         tickMenuChord()
         chordTimer = setInterval(tickMenuChord, 1000)
-        options.onGraph?.(ctx, graph.output)
+        options.onGraph?.(ctx, graph.output, graph)
       }
       if (ctx.state === 'suspended') ctx.resume().catch(() => {})
     },
@@ -71,12 +88,15 @@ export function createAudioWith(options: AudioOptions = {}): AudioEngine {
     },
 
     cue(kind) {
-      if (graph && ctx?.state === 'running') graph.playCue(CUES[kind])
+      // A context created in this very gesture may still be 'suspended' for a few ms; the cue is
+      // scheduled on its clock and simply starts when rendering does.
+      graph?.playCue(CUES[kind])
     },
 
     setScene(next) {
       if (next === scene) return
       scene = next
+      gateLayers(false)
       startTransition()
       apply()
     },
@@ -90,6 +110,7 @@ export function createAudioWith(options: AudioOptions = {}): AudioEngine {
       if (disposed) return
       disposed = true
       if (chordTimer) clearInterval(chordTimer)
+      if (closeTimer) clearTimeout(closeTimer)
       ctx?.close().catch(() => {})
       ctx = null
       graph = null
