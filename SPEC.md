@@ -124,6 +124,14 @@ Ce que le code ne peut pas dire seul.
 
 **Leaderboards.** Locaux (localStorage) au MVP. Un classement mondial exige un backend et une validation anti-triche des ghosts ; c'est hors périmètre tant que le cœur du jeu n'est pas fun.
 
+**Ce que mesurent les classements.** Chaque board est normalisé par avion : 1000 veut dire « bien piloter cet avion sans lire le ciel » (ligne droite plein gaz pour speed, croisière économique pour eco, trim direct pour smooth). On ne dépasse 1000 qu'en lisant la météo. Une référence commune à tous les avions aurait donné le board speed au supersonique d'office, donc `pay_more = win`.
+
+**Le jet est un choix latéral, pas vertical.** Les mesures du lab (2 352 vols headless) ont montré qu'un jet à 10 km ne paie jamais sur des routes de 80 à 160 km : la montée et la redescente mangent tout le gain. Il y a donc un jet bas (4 à 5,5 km, l'altitude où l'on vole déjà), décalé de 9 à 13 km de la ligne droite, en plus du jet haut. Le détour devient la décision.
+
+**La géométrie d'une route ne dépend pas de l'avion.** Les ghosts se courent d'un avion à l'autre dans le même ciel. La durée de vol varie donc selon l'avion ; c'est sa vitesse de croisière qu'on règle, pas la route.
+
+**Réglages sous contrôle du lab.** `pnpm lab` mesure la promesse du jeu : le pilote qui lit le ciel doit battre le pilote naïf sur speed et eco dans plus de 70 % des cas en météo modérée ou extrême, un vol direct doit arriver avec 10 à 30 % de carburant, et aucun avion ne doit dominer un board. Toute retouche de constante dans weather, flight, meta ou scoring repasse par ce banc. L'historique des essais est dans `lab/reports/balance-loop.md`.
+
 **Parallélisme du développement.** Les contrats entre modules vivent dans `src/core/types.ts` et sont gelés pendant une vague. Chaque module a un propriétaire unique et un répertoire unique. Chaque module est développable seul, grâce aux fixtures de `src/core/fixtures/` et à sa page sandbox. Aucun agent n'attend un autre agent.
 
 ## 11. Hors périmètre MVP
