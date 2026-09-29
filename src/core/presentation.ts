@@ -36,10 +36,24 @@ export interface WorldFrame {
   readonly dtReal: number
 }
 
+/**
+ * Screen-space cloud occlusion for other transparent layers (flow particles, later ghost trails):
+ * clouds are composited without a depth buffer, so layers drawn after them test against this instead.
+ * texture (same aspect as the canvas, any resolution; sample with gl_FragCoord.xy / drawingBufferSize, linear filter):
+ *   r = cloud opacity along the pixel's view ray, 0..1
+ *   g = opacity-weighted mean view distance of that cloud (meters from the camera), 0 where r = 0
+ * Consumer rule: fragment at distance d is hidden by (r * smoothstep(g - 400, g + 400, d)).
+ * Valid after render(); consumers read the previous frame's content (one frame of lag is acceptable).
+ */
+export interface CloudOcclusion {
+  readonly texture: THREE.Texture
+}
+
 export interface WorldView {
   readonly scene: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
   readonly renderer: THREE.WebGLRenderer
+  readonly cloudOcclusion: CloudOcclusion
   setWeather(weather: WeatherField): void
   setRoute(route: Route): void
   setAircraft(spec: AircraftSpec, liveryColor: string): void
@@ -57,6 +71,8 @@ export type CreateWorldView = (canvas: HTMLCanvasElement) => WorldView
 
 export interface FlowLayer {
   setWeather(weather: WeatherField): void
+  /** Hide particles behind clouds. Called once after creation by the game. */
+  setCloudOcclusion(occlusion: CloudOcclusion): void
   /** Advect and redraw particles around the camera. simT = weather time. */
   update(camera: THREE.Camera, simT: number, dtReal: number): void
   /** 0..1 global visual intensity (player setting / accessibility). */
