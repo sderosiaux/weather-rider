@@ -5,15 +5,23 @@ import { hashInts } from '../core/rng'
 const SIZE = 1024
 const MASK = SIZE - 1
 
+/** Slots of `NoisePair.res`: first field ("potential", in [-1, 1]) with its x/z partials, second independent field. */
+export const PSI = 0
+export const D_PSI_DX = 1
+export const D_PSI_DZ = 2
+export const PHI = 3
+
+/**
+ * Input and output go through typed arrays: V8 boxes double arguments and object-field
+ * doubles on non-inlined calls, and this runs per particle per frame.
+ */
 export interface NoisePair {
-  /** Evaluates two independent fields at (x, y, z) in lattice units and stores results in the fields below. */
-  eval(x: number, y: number, z: number): void
-  /** First field ("potential"), in [-1, 1], with its x/z partial derivatives. */
-  psi: number
-  dPsiDx: number
-  dPsiDz: number
-  /** Second independent field, in [-1, 1]. */
-  phi: number
+  /** Lattice-space point (x, y, z) to evaluate at. */
+  readonly inp: Float64Array
+  /** Results, indexed by PSI / D_PSI_DX / D_PSI_DZ / PHI. */
+  readonly res: Float64Array
+  /** Evaluates both fields at `inp` into `res`. */
+  eval(): void
 }
 
 export function createNoisePair(seed: number): NoisePair {
@@ -35,12 +43,15 @@ export function createNoisePair(seed: number): NoisePair {
     valB[i] = (hashInts(seed, 0xb0b, i) / 4294967296) * 2 - 1
   }
 
-  const n: NoisePair = {
-    psi: 0,
-    dPsiDx: 0,
-    dPsiDz: 0,
-    phi: 0,
-    eval(x, y, z) {
+  const inp = new Float64Array(3)
+  const res = new Float64Array(4)
+  return {
+    inp,
+    res,
+    eval() {
+      const x = inp[0]!
+      const y = inp[1]!
+      const z = inp[2]!
       const fx = Math.floor(x)
       const fy = Math.floor(y)
       const fz = Math.floor(z)
@@ -85,9 +96,9 @@ export function createNoisePair(seed: number): NoisePair {
       const k5 = a - c - e + g
       const k6 = a - b - e + f
       const k7 = -a + b + c - d + e - f - g + h
-      n.psi = a + k1 * ux + k2 * uy + k3 * uz + k4 * ux * uy + k5 * uy * uz + k6 * uz * ux + k7 * ux * uy * uz
-      n.dPsiDx = dux * (k1 + k4 * uy + k6 * uz + k7 * uy * uz)
-      n.dPsiDz = duz * (k3 + k5 * uy + k6 * ux + k7 * ux * uy)
+      res[PSI] = a + k1 * ux + k2 * uy + k3 * uz + k4 * ux * uy + k5 * uy * uz + k6 * uz * ux + k7 * ux * uy * uz
+      res[D_PSI_DX] = dux * (k1 + k4 * uy + k6 * uz + k7 * uy * uz)
+      res[D_PSI_DZ] = duz * (k3 + k5 * uy + k6 * ux + k7 * ux * uy)
 
       // Field B, value only.
       const a2 = valB[h000]!, b2 = valB[h100]!, c2 = valB[h010]!, d2 = valB[h110]!
@@ -98,8 +109,7 @@ export function createNoisePair(seed: number): NoisePair {
       const x11 = g2 + (h2 - g2) * ux
       const y0 = x00 + (x10 - x00) * uy
       const y1 = x01 + (x11 - x01) * uy
-      n.phi = y0 + (y1 - y0) * uz
+      res[PHI] = y0 + (y1 - y0) * uz
     },
   }
-  return n
 }

@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { v3 } from '../core/math'
 import { createRng } from '../core/rng'
 import type { MutableWeatherSample, Vec3, WeatherField, WeatherFeature, WeatherParams } from '../core/types'
+import { SEVERE_TURBULENCE } from '../core/constants'
+import { dailyWeatherFor, weatherParamsFor } from '../meta'
+import type { Route } from '../core/types'
 import { createWeather } from './index'
 
 const params = (seed: number, severity: number, gateZ = 0): WeatherParams => ({
@@ -251,27 +254,104 @@ describe('createWeather', () => {
   })
 })
 
-// Needs `vitest run --pool=forks --execArgv=--expose-gc`; skipped otherwise.
-const gc = (globalThis as { gc?: () => void }).gc
-const heapUsed = () => (globalThis as unknown as { process: { memoryUsage(): { heapUsed: number } } }).process.memoryUsage().heapUsed
-describe.skipIf(!gc)('sample allocation', () => {
-  it('does not allocate per call when `out` is provided', () => {
+/** Storm-core encounters on the straight start→gate line flown at the start altitude. */
+function straightLine(w: WeatherField, route: Route) {
+  const { start, gate } = route
+  const len = Math.hypot(gate.x - start.x, gate.z - start.z)
+  const ux = (gate.x - start.x) / len
+  const uz = (gate.z - start.z) / len
+  let nearestCoreGap = Infinity
+  for (const f of w.features) {
+    if (f.kind !== 'storm') continue
+    const along = Math.min(len, Math.max(0, (f.center.x - start.x) * ux + (f.center.z - start.z) * uz))
+    const d = Math.hypot(f.center.x - (start.x + ux * along), f.center.z - (start.z + uz * along))
+    nearestCoreGap = Math.min(nearestCoreGap, d - 0.6 * f.radius)
+  }
+  const out = newOut()
+  let severeStorm = false
+  for (let s = 0; s <= len && !severeStorm; s += 200) {
+    for (let lat = -2000; lat <= 2000; lat += 1000) {
+      const smp = w.sample(v3(start.x + ux * s - uz * lat, start.y, start.z + uz * s + ux * lat), 0, out)
+      if (smp.dominant === 'storm' && smp.turbulence >= SEVERE_TURBULENCE) severeStorm = true
+    }
+  }
+  return { nearestCoreGap, severeStorm }
+}
+
+describe('routing decisions on real daily routes', () => {
+  it('rough days put a storm core on the straight line, calm days keep it clear', () => {
+    let rough = 0
+    let calm = 0
+    for (let n = 1; n <= 60; n++) {
+      const daily = dailyWeatherFor(n)
+      for (const route of daily.routes) {
+        const w = createWeather(weatherParamsFor(daily, route))
+        const line = straightLine(w, route)
+        if (route.severity >= 0.7) {
+          rough++
+          expect(line.nearestCoreGap, `#${n} ${route.id} sev ${route.severity}`).toBeLessThanOrEqual(2000)
+          expect(line.severeStorm, `#${n} ${route.id} severe turbulence on the line`).toBe(true)
+        } else if (route.severity <= 0.3) {
+          calm++
+          expect(line.nearestCoreGap, `#${n} ${route.id} sev ${route.severity}`).toBeGreaterThan(2000)
+          expect(line.severeStorm, `#${n} ${route.id}`).toBe(false)
+        }
+      }
+    }
+    expect(rough).toBeGreaterThanOrEqual(50)
+    expect(calm).toBeGreaterThanOrEqual(50)
+  })
+
+  it('draws towering storms on the extreme route', () => {
+    const tops: number[] = []
+    for (let n = 1; n <= 60; n++) {
+      const daily = dailyWeatherFor(n)
+      const w = createWeather(weatherParamsFor(daily, daily.routes[2]))
+      for (const f of w.features) if (f.kind === 'storm') tops.push(f.top)
+    }
+    tops.sort((a, b) => a - b)
+    expect(tops[Math.floor(tops.length * 0.1)]!).toBeGreaterThanOrEqual(11_000)
+    expect(tops[tops.length - 1]!).toBeLessThanOrEqual(13_500)
+  })
+})
+
+let sink: unknown = null
+
+/** Garbage collections triggered while `fn` runs synchronously (nothing else can allocate meanwhile). */
+async function collectionsDuring(fn: () => void): Promise<number> {
+  let n = 0
+  const obs = new PerformanceObserver((list) => (n += list.getEntries().length))
+  obs.observe({ entryTypes: ['gc'] })
+  // Flush entries from earlier tests, then measure.
+  await new Promise((r) => setTimeout(r, 20))
+  n = 0
+  fn()
+  await new Promise((r) => setTimeout(r, 50))
+  obs.disconnect()
+  return n
+}
+
+describe('sample allocation', () => {
+  // Counts GCs rather than heap deltas: scavenges during the loop hide garbage from heapUsed.
+  it('does not allocate per call when `out` is provided', async () => {
     const w = createWeather(params(3, 1))
     const out = newOut()
     const p = { x: 0, y: 0, z: 0 }
     const run = (n: number) => {
       for (let i = 0; i < n; i++) {
         p.x = (i * 7919) % 100_000
-        p.y = (i * 131) % 13_000
+        p.y = (i * 131) % 14_000
         p.z = ((i * 613) % 40_000) - 20_000
-        w.sample(p, i * 0.01, out)
+        // Integer t: a double computed per iteration would be boxed by this caller at the call
+        // boundary (the render passes one loop-invariant t per frame, which is not re-boxed).
+        // The sink keeps the JIT from scalar-replacing a freshly allocated result.
+        sink = w.sample(p, i % 900, out)
       }
     }
-    run(300_000)
-    gc!()
-    const before = heapUsed()
-    run(1_000_000)
-    // One small object per call would be ≥ 32 MB here.
-    expect(heapUsed() - before).toBeLessThan(4_000_000)
+    run(400_000)
+    // 3M calls: a single 16-byte object per call (48 MB) would force dozens of scavenges.
+    const gcs = await collectionsDuring(() => run(3_000_000))
+    expect(gcs).toBeLessThanOrEqual(2)
+    expect(sink).toBe(out)
   })
 })
