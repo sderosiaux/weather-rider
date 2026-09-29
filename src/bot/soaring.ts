@@ -71,7 +71,7 @@ export const ECO: SoaringProfile = {
   minClimbRate: 2.5,
   bankEnergy: true,
   maxDetour: 15_000,
-  timeBudget: 1.4,
+  timeBudget: 1.2,
   speed: 'range',
   ride: true,
   liftThrottle: 0,

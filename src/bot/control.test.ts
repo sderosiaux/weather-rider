@@ -88,7 +88,7 @@ describe('altitude hold (still air)', () => {
   it.each(AIRCRAFT.map((a) => [a.id]))('%s climbs 1000 m gently: settles ±40 m, overshoot < 150 m, |Δg| < 0.25', (id) => {
     let maxAlt = 0
     let maxDg = 0
-    const end = hold(id, still, () => cruise(id, { vertical: { kind: 'altitude', target: 4000, maxClimb: 8, maxSink: 8, tau: 25 } }), 420, undefined, (s) => {
+    const end = hold(id, still, () => cruise(id, { vertical: { kind: 'altitude', target: 4000, maxClimb: 8, maxSink: 8, tau: 25 } }), 330, undefined, (s) => {
       maxAlt = Math.max(maxAlt, s.pos.y)
       maxDg = Math.max(maxDg, Math.abs(s.gLoad - 1))
     })

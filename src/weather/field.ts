@@ -228,7 +228,7 @@ export function createSampler(params: WeatherParams, layout: Layout): Sampler {
     if (u > 0) envC *= u >= 1 ? 0 : 1 - u * u * (3 - 2 * u)
     acc[CLOUD] = Math.max(acc[CLOUD]!, colK * envC, 0.9 * ka)
 
-    acc[SCORE] = tCore * 30 + Math.abs(coreW)
+    acc[SCORE] = tCore * 80 + Math.abs(coreW)
     consider('storm')
     acc[SCORE] = flankW
     consider('updraft')
