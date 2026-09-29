@@ -43,6 +43,7 @@ export function startApp(root: HTMLElement): void {
 
   const world = createWorldView(canvas)
   const flow = createFlowLayer(world.scene)
+  flow.setCloudOcclusion(world.cloudOcclusion)
   const hud = createHud(overlay)
   const screens = createScreens(overlay)
   const input = createInput(canvas)
