@@ -1,0 +1,5 @@
+html, body, #app { margin: 0; height: 100%; overflow: hidden; }
+#app { position: relative; }
+.world { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.overlay { position: absolute; inset: 0; pointer-events: none; }
+.overlay > * { pointer-events: auto; }
