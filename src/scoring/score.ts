@@ -51,7 +51,7 @@ const REF_THROTTLE = 0.6
 const SEVERE_K = 20
 /** Reference speed (m/s): the game cruise that maps routes to real block times (meta/daily REF_GAME_CRUISE_MS). */
 const V_REF = 80_000 / 360
-const SPEED_LEVERAGE = 0.65
+const SPEED_LEVERAGE = 0.7
 const ECO_LEVERAGE = 1.2
 const RIDE_NORM = 0.8
 /** gustSensitivity · cabinDamping of the airframe whose smooth board is left as is (between narrow body and wide body). */

@@ -311,8 +311,11 @@ export function createSoaringGuidance(
     const finalLeg = Math.max(8000, 2.5 * Math.sqrt(3000 * turnRadius(state.airspeed, 25 * DEG)))
     // Aim 10 km ahead on the preferred lateral line (the jet core when riding it), the gate on final.
     const aheadX = Math.min(pos.x + 10_000, route.gate.x)
-    const jz = followJet && d > 25_000 ? jetLateral(aheadX, jetCoreAt(jet!, aheadX)?.y ?? h) : NaN
-    const aim = d > Math.max(20_000, 1.5 * finalLeg) ? v3(aheadX, 0, Number.isNaN(jz) ? lineZ(aheadX) : jz) : route.gate
+    // Leave a jet beside the line early enough to come back across: ~3 km of run per km of offset.
+    const offLine = Math.abs(pos.z - lineZ(pos.x))
+    const lineUp = Math.max(20_000, 1.5 * finalLeg, 3 * offLine + 8000)
+    const jz = followJet && d > lineUp ? jetLateral(aheadX, jetCoreAt(jet!, aheadX)?.y ?? h) : NaN
+    const aim = d > lineUp ? v3(aheadX, 0, Number.isNaN(jz) ? lineZ(aheadX) : jz) : route.gate
     const baseTrack = bearingTo(pos, aim)
     if (P.avoid && state.t - lastAvoidT >= 1 && d > finalLeg) {
       lastAvoidT = state.t
