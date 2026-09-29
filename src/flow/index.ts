@@ -79,8 +79,8 @@ export function createFlowLayerWith(scene: THREE.Scene, options: FlowLayerOption
   const mesh = new THREE.Mesh(geometry, material)
   mesh.name = 'flow-layer'
   mesh.frustumCulled = false
-  // Agreed with render: clouds colour 10, optional cloud-core depth pre-pass 11, flow 12.
-  mesh.renderOrder = 12
+  // Agreed with render: clouds are a depth-less fullscreen composite at 10; flow draws over them at 15.
+  mesh.renderOrder = 15
   const drawSize = new THREE.Vector2()
   mesh.onBeforeRender = (renderer) => {
     renderer.getDrawingBufferSize(drawSize)

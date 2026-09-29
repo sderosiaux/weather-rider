@@ -9,8 +9,8 @@
 export const VISUAL_TIME_SCALE = 10
 
 /** Ring buffer depth (points per trail) and real seconds between two recorded points. */
-export const TRAIL_POINTS = 48
-export const PUSH_DT = 0.1
+export const TRAIL_POINTS = 32
+export const PUSH_DT = 0.15
 /** = TRAIL_POINTS * PUSH_DT: how long (real s) a trail remembers. */
 export const TRAIL_S = TRAIL_POINTS * PUSH_DT
 
