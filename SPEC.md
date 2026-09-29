@@ -118,7 +118,7 @@ Ce que le code ne peut pas dire seul.
 
 **Déterminisme.** Toute la simulation (météo, rafales, dynamique de vol) est pure et dérivée d'une seed, avec un pas fixe de 1/60 s. Sans ça, ni la daily weather ni les ghosts ne tiennent. `Math.random()` est interdit dans `src/weather`, `src/flight`, `src/scoring`.
 
-**Échelle du monde.** Unités en mètres et secondes, repère Three.js : x = est (axe principal des routes), y = haut, z = sud. Une route fait 80 à 160 km de jeu, soit un vol de 6 à 12 minutes réelles. Le temps et la distance « réels » affichés (JFK → LIS en 4h51) sont obtenus par un facteur d'échelle propre à chaque route, pas par la simulation. Plafond de jeu : 14 000 m. Les courants sont amplifiés par rapport au réel (updraft de 10 à 30 m/s) pour que la météo soit du terrain et non du bruit.
+**Échelle du monde.** Unités en mètres et secondes, repère Three.js : x = est (axe principal des routes), y = haut, z = sud. Une route fait 90 à 140 km de jeu. Un avion de ligne la couvre en 8 à 12 minutes réelles ; le turboprop et le planeur expérimental, lents par nature, restent sous 14 minutes, et le supersonique, rapide par nature, au-dessus de 4. Le temps et la distance « réels » affichés (JFK → LIS en 4h51) sont obtenus par un facteur d'échelle propre à chaque route, pas par la simulation. Plafond de jeu : 14 000 m. Les courants sont amplifiés par rapport au réel (updraft de 10 à 30 m/s) pour que la météo soit du terrain et non du bruit.
 
 **Ghosts.** On enregistre des échantillons d'état (position, orientation) à 10 Hz, pas les inputs. Un ghost reste rejouable même si la dynamique de vol évolue entre deux versions. Partage via URL encodée, sans serveur.
 
@@ -126,7 +126,7 @@ Ce que le code ne peut pas dire seul.
 
 **Ce que mesurent les classements.** Chaque board est normalisé par avion : 1000 veut dire « bien piloter cet avion sans lire le ciel » (ligne droite plein gaz pour speed, croisière économique pour eco, trim direct pour smooth). On ne dépasse 1000 qu'en lisant la météo. Une référence commune à tous les avions aurait donné le board speed au supersonique d'office, donc `pay_more = win`.
 
-**Le jet est un choix latéral, pas vertical.** Les mesures du lab (2 352 vols headless) ont montré qu'un jet à 10 km ne paie jamais sur des routes de 80 à 160 km : la montée et la redescente mangent tout le gain. Il y a donc un jet bas (4 à 5,5 km, l'altitude où l'on vole déjà), décalé de 9 à 13 km de la ligne droite, en plus du jet haut. Le détour devient la décision.
+**Le jet est un choix latéral, pas vertical.** Les mesures du lab (2 352 vols headless) ont montré qu'un jet à 10 km ne paie jamais sur des routes de 90 à 140 km : la montée et la redescente mangent tout le gain. Il y a donc un jet bas (4 à 5,5 km, l'altitude où l'on vole déjà), décalé de 9 à 13 km de la ligne droite, en plus du jet haut. Le détour devient la décision.
 
 **La géométrie d'une route ne dépend pas de l'avion.** Les ghosts se courent d'un avion à l'autre dans le même ciel. La durée de vol varie donc selon l'avion ; c'est sa vitesse de croisière qu'on règle, pas la route.
 
