@@ -11,6 +11,7 @@ import type {
   HudModel,
   MutableWeatherSample,
   Route,
+  Vec3,
   WeatherField,
 } from '../core/types'
 import { flightModel } from '../flight'
@@ -44,6 +45,8 @@ export interface FlightSession {
   advance(dtReal: number, controls: Controls): FlightOutcome | null
   hud(): HudModel
   ghostPoses(): readonly GhostSample[]
+  /** Dev only: move the aircraft keeping its velocity/orientation (debug deep links). */
+  teleport(pos: Vec3): void
 }
 
 export function createFlightSession(setup: FlightSetup): FlightSession {
@@ -95,5 +98,8 @@ export function createFlightSession(setup: FlightSetup): FlightSession {
       })
     },
     ghostPoses: () => setup.ghosts.map((g) => ghostCodec.poseAt(g, state.t)),
+    teleport(pos) {
+      state = { ...state, pos }
+    },
   }
 }

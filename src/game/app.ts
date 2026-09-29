@@ -174,8 +174,27 @@ export function startApp(root: HTMLElement): void {
   }
 
   const shared = decodeGhost(location.hash || null)
-  if (shared) history.replaceState(null, '', location.pathname)
+  if (shared) history.replaceState(null, '', location.search)
   showTitle()
   if (shared) fly(shared.routeId, progress.unlockedAircraft.includes(shared.aircraftId) ? shared.aircraftId : progress.unlockedAircraft[0]!, shared)
+  else if (import.meta.env.DEV) debugDeepLink()
   requestAnimationFrame(loop)
+
+  /**
+   * Dev-only deep link so agents/screenshots reach real in-game states without menus:
+   * ?fly=0|1|2 (route index) &aircraft=<id> &at=x,y,z (teleport, meters) &hud=0
+   * window.__wr exposes the live session for eval-driven checks.
+   */
+  function debugDeepLink(): void {
+    const q = new URLSearchParams(location.search)
+    const routeIndex = q.get('fly')
+    if (routeIndex === null) return
+    const route = today.routes[Number(routeIndex)] ?? today.routes[0]
+    fly(route.id, q.get('aircraft') ?? AIRCRAFT[0]!.id, null)
+    if (mode.kind !== 'flying') return
+    const at = q.get('at')?.split(',').map(Number)
+    if (at && at.length === 3 && at.every(Number.isFinite)) mode.session.teleport({ x: at[0]!, y: at[1]!, z: at[2]! })
+    if (q.get('hud') === '0') hud.setVisible(false)
+    ;(window as unknown as { __wr: unknown }).__wr = { session: mode.session, world, flow }
+  }
 }
