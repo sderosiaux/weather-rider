@@ -1,0 +1,37 @@
+.wr-stick {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--wr-med) var(--wr-ease);
+  z-index: 5;
+}
+.wr-stick.is-on {
+  opacity: 1;
+}
+.wr-stick__ring {
+  position: absolute;
+  left: calc(var(--wr-stick-r, 200px) * -1);
+  top: calc(var(--wr-stick-r, 200px) * -1);
+  width: calc(var(--wr-stick-r, 200px) * 2);
+  height: calc(var(--wr-stick-r, 200px) * 2);
+  border-radius: 50%;
+  border: 1px dashed var(--wr-frost-edge);
+  opacity: 0.35;
+}
+.wr-stick__dot {
+  position: absolute;
+  left: -5px;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--wr-frost-edge);
+  box-shadow: 0 0 0 1px var(--wr-hairline), var(--wr-shadow-float);
+}
+.wr-stick.is-locked .wr-stick__dot {
+  background: var(--wr-frost-edge);
+}
