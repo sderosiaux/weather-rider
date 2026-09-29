@@ -196,6 +196,18 @@ describe('particle sim', () => {
     expect(inside / 2000).toBeGreaterThan(0.7)
   })
 
+  it('kindShare sums to 1 and tracks the dominant mix (drives the shader density normalisation)', () => {
+    const w = fieldOf({ x: 8, y: 0, z: 0 }, (p) => (p.z > 0 ? 'jetstream' : null))
+    const sim = createParticleSim(1000, K)
+    const view = viewAt(0, 3000, 0)
+    sim.reset(w, 0, view)
+    run(sim, w, view, 30)
+    const total = Array.from(sim.kindShare).reduce((a, b) => a + b, 0)
+    expect(total).toBeCloseTo(1, 4)
+    expect(sim.kindShare[KIND_CODE.jetstream]).toBeGreaterThan(0.5)
+    expect(sim.kindShare[KIND_CODE.updraft]).toBe(0)
+  })
+
   it('samples roughly count / stride particles per frame', () => {
     const w = fieldOf({ x: 1, y: 0, z: 0 })
     const sim = createParticleSim(1200, K)

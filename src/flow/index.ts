@@ -61,6 +61,7 @@ export function createFlowLayerWith(scene: THREE.Scene, options: FlowLayerOption
       uMinPx: { value: 0.75 },
       uFar: { value: FAR_DISTANCE },
       uIntensity: { value: 1 },
+      uKindShare: { value: sim.kindShare },
     },
   ])
   const material = new THREE.ShaderMaterial({
@@ -78,13 +79,13 @@ export function createFlowLayerWith(scene: THREE.Scene, options: FlowLayerOption
   const mesh = new THREE.Mesh(geometry, material)
   mesh.name = 'flow-layer'
   mesh.frustumCulled = false
-  // After clouds (so filaments stay readable in front of them), before UI-ish overlays.
-  mesh.renderOrder = 10
+  // Agreed with render: clouds colour 10, optional cloud-core depth pre-pass 11, flow 12.
+  mesh.renderOrder = 12
   const drawSize = new THREE.Vector2()
   mesh.onBeforeRender = (renderer) => {
     renderer.getDrawingBufferSize(drawSize)
     uniforms.uViewport!.value.copy(drawSize)
-    uniforms.uMinPx!.value = 0.6 * renderer.getPixelRatio()
+    uniforms.uMinPx!.value = 0.9 * renderer.getPixelRatio()
   }
   scene.add(mesh)
 

@@ -33,6 +33,7 @@ uniform vec2 uViewport;    // drawing buffer px
 uniform float uMinPx;      // minimum ribbon half-width in px
 uniform float uFar;
 uniform float uIntensity;
+uniform float uKindShare[8]; // share of particles per kind: a kind that fills the volume dims itself
 
 varying vec4 vColor;
 varying float vSide;
@@ -41,25 +42,25 @@ varying float vSoft;
 
 // rgb = sRGB color, a = base alpha
 const vec4 KIND_COLOR[8] = vec4[8](
-  vec4(0.36, 0.45, 0.58, 0.20),
-  vec4(1.00, 0.50, 0.14, 0.75),
-  vec4(0.22, 0.30, 0.86, 0.72),
-  vec4(1.00, 0.62, 0.36, 0.60),
-  vec4(0.08, 0.80, 0.72, 0.50),
-  vec4(0.10, 0.62, 0.72, 0.55),
-  vec4(0.58, 0.48, 0.92, 0.60),
-  vec4(0.60, 0.14, 0.48, 0.72)
+  vec4(0.97, 0.98, 1.00, 0.30),
+  vec4(1.00, 0.42, 0.06, 0.52),
+  vec4(0.16, 0.26, 0.95, 0.62),
+  vec4(1.00, 0.60, 0.30, 0.50),
+  vec4(0.10, 0.90, 0.78, 0.32),
+  vec4(0.05, 0.70, 0.80, 0.30),
+  vec4(0.62, 0.45, 1.00, 0.60),
+  vec4(0.78, 0.10, 0.55, 0.70)
 );
 // x = world half-width (m) near the camera, y = edge feather (fraction of half-width), z = turbulence wobble (m)
 const vec3 KIND_SHAPE[8] = vec3[8](
-  vec3(0.6, 0.5, 5.0),
-  vec3(1.4, 0.5, 4.0),
-  vec3(1.4, 0.5, 4.0),
+  vec3(0.8, 0.6, 5.0),
+  vec3(2.0, 0.6, 4.0),
+  vec3(2.0, 0.6, 4.0),
   vec3(4.0, 1.0, 3.0),
-  vec3(6.0, 0.85, 3.0),
-  vec3(1.6, 0.7, 4.0),
-  vec3(0.7, 0.5, 3.0),
-  vec3(1.2, 0.5, 10.0)
+  vec3(2.2, 0.9, 3.0),
+  vec3(2.0, 0.7, 4.0),
+  vec3(1.0, 0.6, 3.0),
+  vec3(1.8, 0.6, 10.0)
 );
 
 void main() {
@@ -91,7 +92,7 @@ void main() {
   if (kind == 4) {
     // Aurora: hue drifts along the ribbon and over time.
     // Hue follows world position so neighbouring ribbons share a band, like a curtain.
-    float w = 0.5 + 0.5 * sin(p.x * 0.0007 + p.y * 0.003 + p.z * 0.0005 + uTime * 0.25);
+    float w = 0.5 + 0.5 * sin(p.x * 0.0002 + p.y * 0.0015 + p.z * 0.00025 + uTime * 0.15);
     col = mix(vec3(0.05, 0.78, 0.62), vec3(0.50, 0.30, 0.95), w);
     col = mix(col, vec3(0.30, 0.55, 1.0), 0.35 * ageN);
   }
@@ -112,19 +113,23 @@ void main() {
   p += wob * agit * shape.z * 1.3;
   p.y += sin(uTime * 17.0 + ph) * agit * shape.z * 0.3;
   // Shear: a coherent standing wave in world space (Kelvin-Helmholtz billows), shared by neighbouring trails.
-  if (kind == 5) p.y += sin(p.x * 0.014 + p.z * 0.005 - uTime * 0.8) * 32.0;
+  if (kind == 5) p.y += sin(p.x * 0.002 + p.z * 0.001 - uTime * 0.4) * 45.0;
 
   float alpha = base.a;
-  alpha *= kind == 0 ? (1.0 - ageN) * (1.0 - ageN) : 1.0 - ageN; // fade along the trail; calm air shorter
+  alpha *= kind == 0 ? 1.0 - ageN : 1.0 - ageN * ageN; // fade along the trail; calm air shorter
   alpha *= smoothstep(0.0, 2.0, stamp - info.y);        // fade in after spawn
   alpha *= 0.65 + 0.35 * smoothstep(4.0, 30.0, speed) + 0.3 * max(up, down);
   alpha *= 1.0 - agit * 0.55 * (0.5 + 0.5 * sin(uTime * (11.0 + seed * 9.0) + stamp * 1.7));
   alpha *= 1.0 - 0.3 * ext.y;                           // inside clouds: let the cloud speak, a little
   float dist = distance(p, cameraPosition);
-  alpha *= smoothstep(uFar, uFar * 0.8, dist) * smoothstep(40.0, 250.0, dist);
+  alpha *= smoothstep(uFar, uFar * 0.8, dist) * smoothstep(60.0, 400.0, dist);
   // Near filaments are big and many (importance spawning packs them inside features): calm them down;
   // far ones are thin: push them so a column kilometres away still reads.
   alpha *= mix(0.6, 1.2, smoothstep(400.0, 4000.0, dist));
+  // Density normalisation: inside a 20 km jet or a world-wide shear layer every particle has the same kind,
+  // and thousands of overlapping ribbons turn into a wall. Dim a kind in proportion to how much of the
+  // volume it owns, so it reads as a river rather than a fog. Rare kinds (a distant updraft) stay full strength.
+  alpha *= mix(1.0, kind == 0 ? 0.75 : 0.4, smoothstep(0.25, 0.9, uKindShare[kind]));
   alpha *= uIntensity;
 
   vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
@@ -137,7 +142,7 @@ void main() {
 
   // Grows with distance so a column 5 km out still reads; near filaments stay fine.
   // Pointed head, thinner tail.
-  float halfW = shape.x * (1.0 - 0.45 * ageN) * mix(0.15, 1.0, smoothstep(0.0, 1.5, age)) * (1.0 + 0.5 * turb) * (1.0 + dist / 800.0);
+  float halfW = shape.x * (1.0 - 0.45 * ageN) * mix(0.15, 1.0, smoothstep(0.0, 1.5, age)) * (1.0 + 0.5 * turb) * (1.0 + dist / 1500.0);
   float halfPx = halfW * projectionMatrix[1][1] * 0.5 * uViewport.y / max(clip.w, 1e-3);
   float drawPx = max(halfPx, uMinPx);
   alpha *= clamp(halfPx / drawPx, 0.25, 1.0);         // sub-pixel: keep coverage honest
