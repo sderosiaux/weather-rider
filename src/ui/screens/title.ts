@@ -183,7 +183,7 @@ export const renderTitle = (
 
   const screen = h(
     'section',
-    { class: 'wr-screen wr-title', 'aria-label': 'Weather Rider' },
+    { class: 'wr-screen wr-title', 'aria-label': 'Weather Rider', 'data-screen': 'title' },
     h(
       'div',
       'wr-title__hero',

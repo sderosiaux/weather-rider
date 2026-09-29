@@ -83,7 +83,13 @@ export const renderResults = (
           'div',
           'wr-unlocked',
           h('h2', 'wr-sheet__title', 'Unlocked in the hangar'),
-          h('ul', 'wr-unlocked__list', m.newlyUnlocked.map((u) => h('li', {}, u.name))),
+          h(
+            'ul',
+            'wr-unlocked__list',
+            m.newlyUnlocked.map((u) =>
+              h('li', `wr-unlocked__item wr-unlocked__item--${u.kind}`, h('span', 'wr-unlocked__kind', u.kind === 'aircraft' ? 'New aircraft' : 'Upgrade'), u.name),
+            ),
+          ),
         )
       : null
 

@@ -13,8 +13,6 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
   // Selections survive screen changes (title → hangar → title keeps your route and aircraft).
   const titleMemory: TitleMemory = { routeId: null, aircraftId: null, ghostCode: '' }
   const hangarMemory: HangarMemory = { aircraftId: null }
-  // Results only get ids for unlocks; remember names seen on other screens.
-  const names = new Map<string, string>()
 
   let onEscape: (() => void) | null = null
   const onKey = (e: KeyboardEvent): void => {
@@ -32,6 +30,7 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
     const active = document.activeElement
     const focusKey = sameKind && active instanceof HTMLElement && layer.contains(active) ? active.dataset.key : undefined
     screen.classList.toggle('is-refresh', sameKind)
+    layer.dataset.screen = screen.dataset.screen ?? ''
     layer.replaceChildren(screen)
     layer.classList.remove('is-hidden')
     screen.scrollTop = scroll
@@ -46,16 +45,12 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
 
   return {
     showTitle(daily, progress, aircraft, unlockHints, cb) {
-      for (const a of aircraft) names.set(a.id, a.name)
       mount(renderTitle(daily, progress, aircraft, unlockHints, cb, titleMemory), '.wr-btn--primary', null)
     },
     showResults(model, cb) {
-      names.set(model.aircraft.id, model.aircraft.name)
       mount(renderResults(model, cb), '.wr-actions .wr-btn--primary', cb.onMenu)
     },
     showHangar(model, cb) {
-      for (const a of model.aircraft) names.set(a.id, a.name)
-      for (const u of model.upgrades) names.set(u.id, u.name)
       mount(renderHangar(model, cb, hangarMemory), '.wr-trophy[aria-pressed="true"]', cb.onBack)
     },
     dispose() {

@@ -47,6 +47,9 @@
   --wr-surface-sunk: rgba(21, 38, 58, 0.04);
   --wr-scrim: linear-gradient(100deg, rgba(236, 242, 248, 0.9) 0%, rgba(236, 242, 248, 0.72) 45%, rgba(236, 242, 248, 0.4) 100%);
   --wr-scrim-blur: blur(6px);
+  /* Title over the live demo flight: light only where the words are, the sky stays sharp elsewhere */
+  --wr-title-halo: radial-gradient(closest-side, rgba(238, 243, 249, 0.8) 0%, rgba(238, 243, 249, 0.62) 50%, rgba(238, 243, 249, 0.28) 78%, rgba(238, 243, 249, 0) 100%);
+  --wr-title-text-halo: 0 0 18px rgba(245, 248, 252, 0.9), 0 0 2px rgba(245, 248, 252, 0.8);
   --wr-spotlight: radial-gradient(60% 46% at 50% 58%, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0) 100%);
 
   /* Signal colors, used only to carry meaning */
