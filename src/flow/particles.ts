@@ -95,6 +95,8 @@ export interface ParticleSim {
   /** Ring slots written by the last step() (first `dirtyCount` entries; includes the slot-0 mirror). */
   readonly dirty: Int32Array
   readonly dirtyCount: number
+  /** Share of live particles per KIND_CODE (sums to 1), refreshed at each push and reset. */
+  readonly kindShare: Float32Array
   sampleStride: number
   /** Respawn every particle and invalidate all trails. */
   reset(weather: WeatherField, simT: number, view: ViewVolume): void
@@ -115,6 +117,11 @@ export function createParticleSim(count: number, trailPoints: number, seed = 0x5
   const seeds = new Float32Array(count)
   const points = new Float32Array((trailPoints + 1) * count * STRIDE)
   const dirty = new Int32Array(4)
+  const kindShare = new Float32Array(8)
+  const countKinds = (): void => {
+    kindShare.fill(0)
+    for (let i = 0; i < count; i++) kindShare[kind[i]!]! += 1 / count
+  }
   const sample: MutableWeatherSample = { wind: { x: 0, y: 0, z: 0 }, turbulence: 0, dominant: null, cloud: 0 }
   const probe = { x: 0, y: 0, z: 0 }
 
@@ -203,6 +210,7 @@ export function createParticleSim(count: number, trailPoints: number, seed = 0x5
     trailPoints,
     points,
     dirty,
+    kindShare,
     sampleStride: DEFAULT_SAMPLE_STRIDE,
     get head() {
       return head
@@ -227,6 +235,7 @@ export function createParticleSim(count: number, trailPoints: number, seed = 0x5
         life[i] = LIFE_MIN * 0.2 + (LIFE_MAX - LIFE_MIN * 0.2) * rng()
         writeRecord(head, i)
       }
+      countKinds()
       dirtyCount = 0
     },
 
@@ -260,6 +269,7 @@ export function createParticleSim(count: number, trailPoints: number, seed = 0x5
         writeRecord(head, i)
       }
       markDirty(head)
+      countKinds()
     },
 
     positionOf(i, out) {

@@ -9,8 +9,8 @@
 export const VISUAL_TIME_SCALE = 10
 
 /** Ring buffer depth (points per trail) and real seconds between two recorded points. */
-export const TRAIL_POINTS = 32
-export const PUSH_DT = 0.05
+export const TRAIL_POINTS = 48
+export const PUSH_DT = 0.1
 /** = TRAIL_POINTS * PUSH_DT: how long (real s) a trail remembers. */
 export const TRAIL_S = TRAIL_POINTS * PUSH_DT
 
@@ -36,8 +36,8 @@ export const SPAWN_TRIES = 4
 export const INTERESTING_W = 2.5
 
 /** Real-second lifetime range. */
-export const LIFE_MIN = 2.5
-export const LIFE_MAX = 6
+export const LIFE_MIN = 5
+export const LIFE_MAX = 10
 
 /** Weather is sampled for 1 particle in `stride` each frame; velocities are held in between. */
 export const DEFAULT_SAMPLE_STRIDE = 2
