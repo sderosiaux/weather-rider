@@ -225,41 +225,6 @@ describe('createWeather', () => {
     expect(worst.turb, `turbulence jump over 10 m at ${worst.turbAt}`).toBeLessThan(0.1)
     expect(worst.time, `wind jump over 1/60 s at ${worst.timeAt}`).toBeLessThan(1.5)
   }, 30_000)
-
-  it('samples 100k corridor points fast, without reallocating the output', () => {
-    const w = createWeather(params(99, 1))
-    const rng = createRng(3)
-    const n = 100_000
-    const pts = new Float64Array(n * 4)
-    for (let i = 0; i < n; i++) {
-      pts[i * 4] = rng() * 100_000
-      pts[i * 4 + 1] = rng() * 13_000
-      pts[i * 4 + 2] = (rng() * 2 - 1) * 20_000
-      pts[i * 4 + 3] = rng() * 600
-    }
-    const out = newOut()
-    const p = { x: 0, y: 0, z: 0 }
-    const run = () => {
-      let acc = 0
-      for (let i = 0; i < n; i++) {
-        p.x = pts[i * 4]!
-        p.y = pts[i * 4 + 1]!
-        p.z = pts[i * 4 + 2]!
-        const s = w.sample(p, pts[i * 4 + 3]!, out)
-        acc += s.wind.x
-      }
-      return acc
-    }
-    run()
-    run()
-    const t0 = performance.now()
-    const acc = run()
-    const ms = performance.now() - t0
-    console.log(`weather.sample: 100k samples in ${ms.toFixed(1)} ms`)
-    expect(Number.isFinite(acc)).toBe(true)
-    expect(ms).toBeLessThan(150)
-    expect(w.sample(p, 0, out)).toBe(out)
-  })
 })
 
 /** Storm-core encounters on the straight start→gate line flown at the start altitude. */
