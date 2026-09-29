@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Weather Rider — flow sandbox</title>
+  <style>
+    :root {
+      --sky-top: #5f9fd8;
+      --sky-mid: #a9d0ef;
+      --sky-horizon: #f1e6d6;
+      --panel-bg: rgba(255, 255, 255, 0.72);
+      --panel-fg: #1d2b3a;
+      --panel-accent: #2f6fb0;
+      --font: ui-sans-serif, -apple-system, 'Helvetica Neue', sans-serif;
+    }
+    html, body { margin: 0; height: 100%; overflow: hidden; font-family: var(--font); }
+    body { background: linear-gradient(to bottom, var(--sky-top) 0%, var(--sky-mid) 55%, var(--sky-horizon) 100%); }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #panel {
+      position: fixed; top: 12px; left: 12px; padding: 10px 12px; border-radius: 10px;
+      background: var(--panel-bg); color: var(--panel-fg); font-size: 12px; line-height: 1.5;
+      backdrop-filter: blur(8px); min-width: 230px;
+    }
+    #panel button {
+      font: inherit; margin: 2px 2px 0 0; padding: 3px 8px; border-radius: 6px; cursor: pointer;
+      border: 1px solid var(--panel-accent); background: transparent; color: var(--panel-accent);
+      transition: background 0.15s, color 0.15s;
+    }
+    #panel button:hover, #panel button.on { background: var(--panel-accent); color: #fff; }
+    #stats { font-variant-numeric: tabular-nums; }
+    #panel.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="panel">
+    <div id="stats">—</div>
+    <div id="presets"></div>
+    <div>WASD move · R/F up/down · drag / arrows look · shift fast · 0-9 intensity · H hide</div>
+  </div>
+  <script type="module" src="./flow.ts"></script>
+</body>
+</html>
