@@ -1,5 +1,5 @@
 // App shell: title → flight → results, hangar. Owns persistence and wiring, no game rules.
-import type { AircraftSpec, AircraftState, DailyWeather, Ghost, PlayerProgress } from '../core/types'
+import type { AircraftSpec, AircraftState, Ghost, PlayerProgress } from '../core/types'
 import { AIRCRAFT, aircraftById, flightModel } from '../flight'
 import { createFlowLayer } from '../flow'
 import {
