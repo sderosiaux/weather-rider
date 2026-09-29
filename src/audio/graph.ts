@@ -8,8 +8,8 @@
 import { impulseResponse, pinkNoise } from './buffers'
 import type { CueScore } from './cues'
 import { cueDuration } from './cues'
-import type { MixTargets } from './mix'
-import { SMOOTHING } from './mix'
+import type { Layer, MixTargets } from './mix'
+import { LAYERS, SMOOTHING } from './mix'
 import { JET_CHORD, MENU_CHORDS, midiToHz, SHIMMER_BASE_HZ, SHIMMER_RATIOS, SINK_BASE_HZ, SINK_RATIOS } from './voices'
 
 export interface AudioGraph {
@@ -20,6 +20,15 @@ export interface AudioGraph {
   setMenuChord(midi: readonly number[]): void
   playCue(score: CueScore): void
   setVolume(volume: number): void
+  /** Connect these layers to their buses (instant: their level params do the fading). */
+  openLayers(layers: ReadonlySet<Layer>): void
+  /**
+   * Disconnect every other layer. A disconnected subtree is no longer pulled by the renderer,
+   * so its oscillators and noise loops cost nothing. Only call once their levels have faded out.
+   */
+  closeLayersExcept(layers: ReadonlySet<Layer>): void
+  /** Running source nodes (oscillators + noise loops) in total, and those currently rendered. */
+  sourceCount(): { readonly total: number; readonly rendered: number }
 }
 
 type Smooth = (value: number, tau: number) => void
@@ -27,8 +36,16 @@ type Smooth = (value: number, tau: number) => void
 const MASTER_HEADROOM = 1.3
 const REVERB_RETURN = 0.3
 
-export function buildGraph(ctx: AudioContext): AudioGraph {
+export function buildGraph(ctx: BaseAudioContext): AudioGraph {
   const sr = ctx.sampleRate
+  // Source bookkeeping per layer, so gating is measurable. `building` = layer being constructed.
+  let building: Layer | 'shared' = 'shared'
+  const sources: Record<Layer | 'shared', number> = { shared: 0, ...Object.fromEntries(LAYERS.map((l) => [l, 0])) } as Record<Layer | 'shared', number>
+  const routes = new Map<Layer, { readonly node: AudioNode; readonly dests: readonly AudioNode[]; open: boolean }>()
+  /** Declare the output of a gated layer. Starts closed; openLayers() connects it. */
+  const route = (layer: Layer, node: AudioNode, ...dests: AudioNode[]): void => {
+    routes.set(layer, { node, dests, open: false })
+  }
 
   /** Wraps an AudioParam: skips redundant targets so per-frame updates don't pile up automation events. */
   const smooth = (param: AudioParam, initial: number): Smooth => {
@@ -58,6 +75,7 @@ export function buildGraph(ctx: AudioContext): AudioGraph {
     o.frequency.value = hz
     o.detune.value = detuneCents
     o.start()
+    sources[building]++
     return o
   }
   const makeBuffer = (channels: readonly Float32Array[]): AudioBuffer => {
@@ -71,6 +89,7 @@ export function buildGraph(ctx: AudioContext): AudioGraph {
     s.loop = true
     s.playbackRate.value = rate
     s.start(0, offset)
+    sources[building]++
     return s
   }
   /** Gain whose level is `base` ± `depth`, modulated by an LFO (audio-rate, so no zipper). */
@@ -105,10 +124,11 @@ export function buildGraph(ctx: AudioContext): AudioGraph {
   const reverb = gain(REVERB_RETURN)
   convolver.connect(reverb)
   reverb.connect(master)
-  const sendToReverb = (node: AudioNode, amount: number): void => {
+  /** A reverb send input. Not connected from anything yet (gated layers connect through route()). */
+  const reverbSend = (amount: number): GainNode => {
     const s = gain(amount)
-    node.connect(s)
     s.connect(convolver)
+    return s
   }
 
   // ─── noise sources (looped, running forever; different lengths never line up) ─
@@ -144,15 +164,18 @@ export function buildGraph(ctx: AudioContext): AudioGraph {
   }
 
   // ─── rumble + buffet ──────────────────────────────────────────────────────
+  building = 'rumble'
   const buffetLfos = [osc('sine', 2), osc('sine', 2 * 1.37)]
   const rumble = modulated(buffetLfos, 0, 0)
-  loop(monoNoise, 0.5, 2.1).connect(filter('lowpass', 150, 0.9)).connect(rumble.node).connect(world)
+  loop(monoNoise, 0.5, 2.1).connect(filter('lowpass', 150, 0.9)).connect(rumble.node)
+  route('rumble', rumble.node, world)
   const buffetHz = buffetLfos.map((l) => smooth(l.frequency, l.frequency.value))
 
   // ─── engine ───────────────────────────────────────────────────────────────
+  building = 'engine'
   const engineAmp = gain(0)
   const engineLevel = smooth(engineAmp.gain, 0)
-  engineAmp.connect(world)
+  route('engine', engineAmp, world)
   const droneA = osc('sawtooth', 80)
   const droneB = osc('triangle', 40, 4)
   const droneLp = filter('lowpass', 400, 0.6)
@@ -181,10 +204,10 @@ export function buildGraph(ctx: AudioContext): AudioGraph {
   }
 
   // ─── rising air: consonant shimmer with slow independent tremolos ─────────
+  building = 'shimmer'
   const shimmerAmp = gain(0)
   const shimmerLevel = smooth(shimmerAmp.gain, 0)
-  shimmerAmp.connect(world)
-  sendToReverb(shimmerAmp, 0.8)
+  route('shimmer', shimmerAmp, world, reverbSend(0.8))
   const shimmerFreqs = SHIMMER_RATIOS.map((ratio, i) => {
     const o = osc('sine', SHIMMER_BASE_HZ * ratio, i % 2 ? 5 : -5)
     const trem = modulated([osc('sine', 0.19 + 0.13 * i)], 0.6 / (1 + i * 0.6), 0.4 / (1 + i * 0.6))
@@ -193,10 +216,12 @@ export function buildGraph(ctx: AudioContext): AudioGraph {
   })
 
   // ─── sinking air: dark low fifth + low noise ──────────────────────────────
+  building = 'sink'
   const sinkAmp = gain(0)
   const sinkLevel = smooth(sinkAmp.gain, 0)
   const sinkLp = filter('lowpass', 240, 0.7)
-  sinkLp.connect(sinkAmp).connect(world)
+  sinkLp.connect(sinkAmp)
+  route('sink', sinkAmp, world)
   const sinkFreqs = SINK_RATIOS.map((ratio, i) => {
     const o = osc(i === 0 ? 'sine' : 'triangle', SINK_BASE_HZ * ratio)
     o.connect(gain(i === 0 ? 1 : 0.5)).connect(sinkLp)
@@ -205,14 +230,15 @@ export function buildGraph(ctx: AudioContext): AudioGraph {
   loop(monoNoise, 0.35, 0.7).connect(gain(0.6)).connect(sinkLp)
 
   // ─── pads: jet stream (moving, aurora-like panning) and menu bed ──────────
-  const pad = (midi: readonly number[], cutoff: number, sweepHz: number, sweepDepth: number, movingPan: boolean) => {
+  const pad = (layer: Layer, midi: readonly number[], cutoff: number, sweepHz: number, sweepDepth: number, movingPan: boolean) => {
+    building = layer
     const amp = gain(0)
     const lp = filter('lowpass', cutoff, 0.5)
     const sweep = osc('sine', sweepHz)
     const sweepDepthNode = gain(sweepDepth)
     sweep.connect(sweepDepthNode).connect(lp.frequency)
-    lp.connect(amp).connect(world)
-    sendToReverb(amp, 0.9)
+    lp.connect(amp)
+    route(layer, amp, world, reverbSend(0.9))
     const voices = midi.map((m, i) => {
       const panner = ctx.createStereoPanner()
       const spread = midi.length > 1 ? -0.7 + (1.4 * i) / (midi.length - 1) : 0
@@ -229,17 +255,20 @@ export function buildGraph(ctx: AudioContext): AudioGraph {
     })
     return { level: smooth(amp.gain, 0), voices }
   }
-  const jetPad = pad(JET_CHORD, 1900, 0.07, 900, true)
-  const menuPad = pad(MENU_CHORDS[0]!, 850, 0.035, 350, false)
+  const jetPad = pad('jetPad', JET_CHORD, 1900, 0.07, 900, true)
+  const menuPad = pad('menuPad', MENU_CHORDS[0]!, 850, 0.035, 350, false)
 
   // ─── stall: soft pulsing two-note tone, not a klaxon ──────────────────────
+  building = 'stall'
   const stallTone = filter('lowpass', 1400, 0.7)
   osc('triangle', midiToHz(74)).connect(stallTone)
   osc('sine', midiToHz(81)).connect(gain(0.5)).connect(stallTone)
   const stallAm = modulated([osc('sine', 2.4)], 0.5, 0.5)
   const stallAmp = gain(0)
   const stallLevel = smooth(stallAmp.gain, 0)
-  stallTone.connect(stallAm.node).connect(stallAmp).connect(master)
+  stallTone.connect(stallAm.node).connect(stallAmp)
+  route('stall', stallAmp, master)
+  building = 'shared'
 
   return {
     output: compressor,
@@ -298,7 +327,7 @@ export function buildGraph(ctx: AudioContext): AudioGraph {
       const t0 = ctx.currentTime + 0.02
       const bus = gain(1)
       bus.connect(master)
-      sendToReverb(bus, score.reverb)
+      bus.connect(reverbSend(score.reverb))
       const nodes: AudioNode[] = [bus]
       for (const n of score.notes) {
         const start = t0 + n.at
@@ -337,6 +366,29 @@ export function buildGraph(ctx: AudioContext): AudioGraph {
       }
       // Release the one-shot nodes once the cue (and its reverb send) has finished.
       setTimeout(() => nodes.forEach((node) => node.disconnect()), (cueDuration(score) + 0.2) * 1000)
+    },
+
+    openLayers(layers) {
+      for (const layer of layers) {
+        const r = routes.get(layer)
+        if (!r || r.open) continue
+        for (const d of r.dests) r.node.connect(d)
+        r.open = true
+      }
+    },
+
+    closeLayersExcept(layers) {
+      for (const [layer, r] of routes) {
+        if (layers.has(layer) || !r.open) continue
+        r.node.disconnect()
+        r.open = false
+      }
+    },
+
+    sourceCount() {
+      let rendered = sources.shared
+      for (const [layer, r] of routes) if (r.open) rendered += sources[layer]
+      return { total: Object.values(sources).reduce((a, b) => a + b, 0), rendered }
     },
 
     setVolume(v) {
