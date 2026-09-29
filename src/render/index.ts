@@ -4,7 +4,8 @@ import type { AircraftSpec, MutableWeatherSample, Route, WeatherField, WeatherFe
 import { createAircraftVisual } from './aircraft/visual'
 import { createAtmosphereUniforms, createSky, PALETTE, SUN_DIR } from './atmosphere'
 import { createChaseCamera, smoothing } from './camera'
-import { layoutClouds } from './clouds/layout'
+import { layoutClouds, layoutHorizon } from './clouds/layout'
+import { createCloudPass } from './clouds/composite'
 import { createCloudLayer } from './clouds/mesh'
 import { createGateLayer } from './gate'
 import { createGhostLayer } from './ghosts'
@@ -13,6 +14,8 @@ import { createGlowTexture, createNoiseTexture, createPuffAtlas } from './textur
 
 const NEAR = 0.5
 const FAR = 450_000
+/** The player aircraft draws in its own pass, over the (half-res, depthless) clouds. */
+const AIRCRAFT_LAYER = 1
 
 /** Horizontal direction the upper-level wind blows toward (anvils shear that way). */
 function upperWindDir(weather: WeatherField): { x: number; y: number; z: number } {
@@ -70,10 +73,16 @@ export const createWorldView: CreateWorldView = (canvas) => {
   const gate = createGateLayer(atmosphere, glow)
   const chase = createChaseCamera()
 
+  const cloudPass = createCloudPass()
+  const cloudScene = new THREE.Scene()
+  cloudScene.add(clouds.mesh)
+
   const sun = new THREE.DirectionalLight(new THREE.Color(1.0, 0.8, 0.6), 3.2)
   sun.position.copy(SUN_DIR)
   const hemi = new THREE.HemisphereLight(new THREE.Color(0.55, 0.65, 0.85), new THREE.Color(0.12, 0.16, 0.22), 1.3)
-  scene.add(sky, sea.mesh, clouds.mesh, aircraft.group, aircraft.worldObjects, ghosts.group, gate.group, sun, hemi)
+  for (const light of [sun, hemi]) light.layers.enable(AIRCRAFT_LAYER)
+  scene.add(sky, sea.mesh, cloudPass.composite, clouds.depthMesh, aircraft.worldObjects, ghosts.group, gate.group, sun, hemi, aircraft.group)
+  const drawingSize = new THREE.Vector2()
 
   let weather: WeatherField | null = null
   let spec: AircraftSpec | null = null
@@ -89,8 +98,8 @@ export const createWorldView: CreateWorldView = (canvas) => {
     renderer,
     setWeather(w) {
       weather = w
-      const puffs = layoutClouds(w.features, { seed: w.seed, sun: SUN_DIR, windDir: upperWindDir(w) })
-      clouds.setPuffs(puffs)
+      const opts = { seed: w.seed, sun: SUN_DIR, windDir: upperWindDir(w) }
+      clouds.setPuffs([...layoutClouds(w.features, opts), ...layoutHorizon(w.boundsMin, w.boundsMax, opts)])
       sea.setShadows(seaShadows(w.features))
     },
     setRoute(route: Route) {
@@ -99,11 +108,11 @@ export const createWorldView: CreateWorldView = (canvas) => {
     setAircraft(s, liveryColor) {
       spec = s
       aircraft.set(s, liveryColor)
-      ghosts.setAirframe(aircraft.model?.geometry ?? null)
+      aircraft.group.traverse((o) => o.layers.set(AIRCRAFT_LAYER))
       chase.reset()
     },
     setGhosts(list: readonly GhostVisual[]) {
-      ghosts.set(list, aircraft.model?.geometry ?? null)
+      ghosts.set(list)
     },
     update(frame: WorldFrame) {
       const dt = Math.min(Math.max(frame.dtReal, 0), 0.25)
@@ -127,11 +136,25 @@ export const createWorldView: CreateWorldView = (canvas) => {
       const pixelAngle = (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / cssHeight
       aircraft.setPixelAngle(pixelAngle)
       ghosts.setPixelAngle(pixelAngle)
+      cloudPass.render(renderer, cloudScene, camera)
+      // Pass 1: world (sky, sea, composited clouds, trails, gate, ghosts, third-party layers).
+      camera.layers.set(0)
       renderer.render(scene, camera)
+      // Pass 2: the player aircraft on top. Nothing in the world legitimately sits between it and
+      // a chase camera 150 m behind, and in-cloud the player must still see their aircraft.
+      const autoClear = renderer.autoClear
+      renderer.autoClear = false
+      renderer.clearDepth()
+      camera.layers.set(AIRCRAFT_LAYER)
+      renderer.render(scene, camera)
+      camera.layers.set(0)
+      renderer.autoClear = autoClear
     },
     resize(width, height) {
       cssHeight = Math.max(1, height)
       renderer.setSize(width, height, false)
+      renderer.getDrawingBufferSize(drawingSize)
+      cloudPass.setSize(drawingSize.x, drawingSize.y)
       camera.aspect = width / Math.max(1, height)
       camera.updateProjectionMatrix()
     },
@@ -140,6 +163,7 @@ export const createWorldView: CreateWorldView = (canvas) => {
       ;(sky.material as THREE.Material).dispose()
       sea.dispose()
       clouds.dispose()
+      cloudPass.dispose()
       aircraft.dispose()
       ghosts.dispose()
       gate.dispose()

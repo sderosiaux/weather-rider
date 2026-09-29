@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { v3 } from '../../core/math'
 import type { WeatherFeature } from '../../core/types'
-import { layoutClouds, shadeCluster, smoothShade, type Puff } from './layout'
+import { layoutClouds, layoutHorizon, shadeCluster, smoothShade, type Puff } from './layout'
 
 const sun = v3(0.33, 0.14, -0.93)
 const opts = { seed: 184, sun, windDir: v3(1, 0, 0) }
@@ -72,6 +72,19 @@ describe('sun shading', () => {
     for (const p of smoothShade(shaded)) {
       expect(p.shade).toBeGreaterThanOrEqual(lo - 1e-9)
       expect(p.shade).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+describe('layoutHorizon', () => {
+  it('keeps decorative banks strictly outside the playable bounds', () => {
+    const min = v3(-30_000, 0, -30_000)
+    const max = v3(172_500, 14_000, 32_600)
+    const puffs = layoutHorizon(min, max, opts)
+    expect(puffs.length).toBeGreaterThan(100)
+    for (const p of puffs.filter((q) => q.ay !== 1)) {
+      const inside = p.x > min.x && p.x < max.x && p.z > min.z && p.z < max.z
+      expect(inside).toBe(false)
     }
   })
 })

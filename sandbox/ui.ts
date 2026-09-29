@@ -101,13 +101,25 @@ const results = (status: 'arrived' | 'crashed'): ResultsModel => ({
   newlyUnlocked: status === 'arrived' ? ['widebody', 'gust-probe'] : [],
 })
 
+// Mirrors what meta.unlockHints produces: absent = unlocked.
+const SAMPLE_HINTS: Record<string, string> = {
+  regional: '1 more flight',
+  narrowbody: '3 more flights',
+  widebody: 'Smooth 700',
+  cargo: 'Eco 650',
+  supersonic: 'Speed 800',
+  experimental: '20 more flights',
+}
+const hintsFor = (p: PlayerProgress): Record<string, string> =>
+  Object.fromEntries(Object.entries(SAMPLE_HINTS).filter(([id]) => !p.unlockedAircraft.includes(id)))
+
 // ── Screens ────────────────────────────────────────────────────────────────
 
 const log = (msg: string): void => console.info(`[ui sandbox] ${msg}`)
 
 const showTitle = (progress: PlayerProgress): void => {
   hud.setVisible(false)
-  screens.showTitle(daily, progress, aircraft, {}, {
+  screens.showTitle(daily, progress, aircraft, hintsFor(progress), {
     onFly: (r, a, g) => {
       log(`onFly(${r}, ${a}, ${g ? JSON.stringify(g.slice(0, 40)) : 'null'})`)
       showHud()
@@ -118,8 +130,13 @@ const showTitle = (progress: PlayerProgress): void => {
 let hangarProgress = veteran
 const showHangar = (): void => {
   hud.setVisible(false)
-  screens.showHangar({ progress: hangarProgress, aircraft, upgrades, unlockHints: {} }, {
-    onUnequip: (a, slot) => log(`onUnequip(${a}, ${slot})`),
+  screens.showHangar({ progress: hangarProgress, aircraft, upgrades, unlockHints: hintsFor(hangarProgress) }, {
+    onUnequip: (a, slot) => {
+      log(`onUnequip(${a}, ${slot})`)
+      const kept = (hangarProgress.loadouts[a] ?? []).filter((id) => upgrades.find((x) => x.id === id)?.slot !== slot)
+      hangarProgress = { ...hangarProgress, loadouts: { ...hangarProgress.loadouts, [a]: kept } }
+      showHangar()
+    },
     onEquip: (a, u) => {
       log(`onEquip(${a}, ${u})`)
       const slot = upgrades.find((x) => x.id === u)!.slot

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weather Rider — audio sandbox</title>
+  <style>
+    :root {
+      --bg-top: #9cc8ec;
+      --bg-bottom: #f3ebdf;
+      --panel-bg: rgba(255, 255, 255, 0.78);
+      --panel-fg: #1d2b3a;
+      --muted: #5b6b7c;
+      --accent: #2f6fb0;
+      --accent-fg: #ffffff;
+      --meter-bg: rgba(29, 43, 58, 0.08);
+      --meter-low: #6d8fb3;
+      --meter-mid: #7fb08a;
+      --meter-high: #e0b35a;
+      --font: ui-sans-serif, -apple-system, 'Helvetica Neue', sans-serif;
+    }
+    html, body { margin: 0; min-height: 100%; font-family: var(--font); color: var(--panel-fg); }
+    body { background: linear-gradient(to bottom, var(--bg-top), var(--bg-bottom)); min-height: 100vh; }
+    main { display: grid; grid-template-columns: minmax(280px, 380px) minmax(280px, 1fr); gap: 16px; padding: 16px; max-width: 1100px; margin: 0 auto; }
+    section { background: var(--panel-bg); border-radius: 12px; padding: 14px 16px; backdrop-filter: blur(8px); }
+    h1 { font-size: 15px; font-weight: 600; margin: 0 0 10px; }
+    h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 14px 0 6px; }
+    label { display: grid; grid-template-columns: 120px 1fr 56px; align-items: center; gap: 8px; font-size: 12px; margin: 4px 0; }
+    label output { font-variant-numeric: tabular-nums; text-align: right; color: var(--muted); }
+    select { font: inherit; font-size: 12px; }
+    button {
+      font: inherit; font-size: 12px; margin: 2px 4px 2px 0; padding: 4px 10px; border-radius: 7px; cursor: pointer;
+      border: 1px solid var(--accent); background: transparent; color: var(--accent); transition: background 0.15s, color 0.15s;
+    }
+    button:hover, button.on { background: var(--accent); color: var(--accent-fg); }
+    #start { font-size: 14px; padding: 8px 16px; }
+    #readout { font-variant-numeric: tabular-nums; font-size: 12px; white-space: pre; }
+    .meter { height: 8px; border-radius: 4px; background: var(--meter-bg); margin: 3px 0 8px; overflow: hidden; }
+    .meter > div { height: 100%; width: 0; transition: width 0.1s; }
+    #m-low > div { background: var(--meter-low); }
+    #m-mid > div { background: var(--meter-mid); }
+    #m-high > div { background: var(--meter-high); }
+    #m-rms > div { background: var(--accent); }
+    table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; width: 100%; }
+    td, th { padding: 3px 6px; text-align: right; border-bottom: 1px solid var(--meter-bg); }
+    td:first-child, th:first-child { text-align: left; }
+    .hint { font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>Audio sandbox</h1>
+      <button id="start">Click to start audio</button>
+      <button id="start-cue">Start + arrived cue (same gesture)</button>
+      <div class="hint">Browsers only allow sound after a user gesture.</div>
+      <h2>Scene</h2>
+      <div id="scenes"></div>
+      <h2>Frame</h2>
+      <div id="sliders"></div>
+      <label>dominant <select id="dominant"></select><span></span></label>
+      <label>aircraft <select id="class"></select><span></span></label>
+      <label>stalled <input id="stalled" type="checkbox" /><span></span></label>
+      <h2>Cues</h2>
+      <div id="cues"></div>
+    </section>
+    <section>
+      <h2>Presets</h2>
+      <div id="presets"></div>
+      <h2>Output (AnalyserNode after the compressor)</h2>
+      <div class="hint">RMS</div><div class="meter" id="m-rms"><div></div></div>
+      <div class="hint">low &lt; 250 Hz</div><div class="meter" id="m-low"><div></div></div>
+      <div class="hint">mid 250 Hz – 2 kHz</div><div class="meter" id="m-mid"><div></div></div>
+      <div class="hint">high &gt; 2 kHz</div><div class="meter" id="m-high"><div></div></div>
+      <div id="readout">—</div>
+      <h2>Measured presets</h2>
+      <button id="measure">Measure all presets</button>
+      <table id="table"></table>
+    </section>
+  </main>
+  <script type="module" src="./audio.ts"></script>
+</body>
+</html>

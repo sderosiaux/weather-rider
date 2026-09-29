@@ -7,8 +7,19 @@
   color: var(--wr-ink);
   font-variant-numeric: tabular-nums lining-nums;
   -webkit-font-smoothing: antialiased;
+  text-shadow: var(--wr-halo);
   transition: opacity var(--wr-slow) var(--wr-ease);
   user-select: none;
+}
+/* Clear air: whisper-light glass. Rough air or a storm cell (often a darker sky): the glass firms up. */
+.wr-hud.is-heavy .wr-hud__panel,
+.wr-hud.is-heavy .wr-hud__whisper,
+.wr-hud.is-heavy .wr-hud__take {
+  background: var(--wr-glass-heavy);
+}
+/* The app overlay turns pointer events back on for its children; instruments must never catch clicks. */
+.wr-hud.wr-hud {
+  pointer-events: none;
 }
 .wr-hud.is-hidden {
   opacity: 0;
@@ -17,14 +28,14 @@
 
 .wr-hud__panel {
   position: absolute;
-  background: var(--wr-frost);
-  -webkit-backdrop-filter: var(--wr-frost-blur);
-  backdrop-filter: var(--wr-frost-blur);
-  border: 1px solid var(--wr-frost-edge);
+  background: var(--wr-glass);
+  -webkit-backdrop-filter: var(--wr-glass-blur);
+  backdrop-filter: var(--wr-glass-blur);
+  border: 1px solid var(--wr-glass-edge);
   border-radius: var(--wr-radius-md);
-  box-shadow: var(--wr-shadow-float);
-  padding: var(--wr-space-3) var(--wr-space-4);
-  transition: border-color var(--wr-med) var(--wr-ease), background-color var(--wr-med) var(--wr-ease);
+  box-shadow: var(--wr-glass-shadow);
+  padding: var(--wr-space-2) var(--wr-space-3);
+  transition: border-color var(--wr-med) var(--wr-ease), background-color var(--wr-slow) var(--wr-ease);
 }
 
 .wr-hud__label {
@@ -47,7 +58,7 @@
 }
 .wr-hud__big {
   font-family: var(--wr-font-display);
-  font-size: var(--wr-text-xl);
+  font-size: 24px;
   font-weight: var(--wr-weight-light);
   line-height: 1.05;
   letter-spacing: -0.01em;
@@ -166,13 +177,13 @@
   left: var(--wr-edge);
   top: 50%;
   transform: translateY(-50%);
-  min-width: 112px;
+  min-width: 96px;
 }
 .wr-hud__gs {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  margin-top: var(--wr-space-3);
+  margin-top: var(--wr-space-2);
   padding-top: var(--wr-space-2);
   border-top: 1px solid var(--wr-hairline);
 }
@@ -213,7 +224,7 @@
   transform: translateY(-50%);
   display: flex;
   gap: var(--wr-space-3);
-  min-width: 128px;
+  min-width: 112px;
 }
 .wr-hud__vs-scale {
   position: relative;
@@ -269,8 +280,8 @@
   left: var(--wr-edge);
   bottom: var(--wr-edge);
   display: grid;
-  gap: var(--wr-space-2);
-  min-width: 220px;
+  gap: var(--wr-space-1);
+  min-width: 190px;
 }
 .wr-hud__meter {
   display: grid;
@@ -312,8 +323,8 @@
 }
 .wr-hud__gauge {
   position: relative;
-  width: 76px;
-  height: 76px;
+  width: 64px;
+  height: 64px;
 }
 .wr-hud__gauge svg {
   width: 100%;
@@ -449,6 +460,7 @@
   border-radius: var(--wr-radius-md);
   background: var(--wr-danger);
   color: var(--wr-on-signal);
+  text-shadow: none;
   font-size: var(--wr-text-lg);
   font-weight: var(--wr-weight-strong);
   letter-spacing: var(--wr-tracking-title);
@@ -471,6 +483,60 @@
   to { opacity: 1; }
 }
 
+.wr-hud__coach {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--wr-edge) + 88px);
+  transform: translate(-50%, -4px);
+  max-width: min(560px, 80vw);
+  text-align: center;
+  font-size: var(--wr-text-md);
+  font-weight: var(--wr-weight-medium);
+  line-height: 1.35;
+  padding: var(--wr-space-2) var(--wr-space-4);
+  border-radius: var(--wr-radius-lg);
+  background: var(--wr-glass-heavy);
+  -webkit-backdrop-filter: var(--wr-glass-blur);
+  backdrop-filter: var(--wr-glass-blur);
+  box-shadow: var(--wr-glass-shadow);
+  opacity: 0;
+  transition: opacity var(--wr-slow) var(--wr-ease), transform var(--wr-slow) var(--wr-ease);
+}
+.wr-hud__coach.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.wr-hud__take {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: var(--wr-space-2) var(--wr-space-4);
+  border-radius: var(--wr-radius-pill);
+  background: var(--wr-glass);
+  -webkit-backdrop-filter: var(--wr-glass-blur);
+  backdrop-filter: var(--wr-glass-blur);
+  opacity: 0;
+  transition: opacity var(--wr-slow) var(--wr-ease);
+}
+.wr-hud__take b {
+  font-size: var(--wr-text-md);
+  font-weight: var(--wr-weight-strong);
+}
+.wr-hud__take span {
+  font-size: var(--wr-text-xs);
+  font-weight: var(--wr-weight-medium);
+  color: var(--wr-ink-soft);
+  letter-spacing: 0.04em;
+}
+:root[data-wr-stick='disarmed'] .wr-hud__take {
+  opacity: 0.92;
+}
+
 .wr-hud__whisper {
   position: absolute;
   left: 50%;
@@ -484,9 +550,9 @@
   color: var(--wr-ink);
   padding: var(--wr-space-1) var(--wr-space-4);
   border-radius: var(--wr-radius-pill);
-  background: var(--wr-frost);
-  -webkit-backdrop-filter: var(--wr-frost-blur);
-  backdrop-filter: var(--wr-frost-blur);
+  background: var(--wr-glass);
+  -webkit-backdrop-filter: var(--wr-glass-blur);
+  backdrop-filter: var(--wr-glass-blur);
   opacity: 0;
   transition: opacity var(--wr-slow) var(--wr-ease), transform var(--wr-slow) var(--wr-ease);
 }
@@ -508,5 +574,5 @@
 @media (prefers-reduced-motion: reduce) {
   .wr-hud__stall.is-on { animation: none; opacity: 1; }
   .wr-hud__speed.is-jet .wr-hud__gs-val { animation: none; }
-  .wr-hud__whisper { transition: opacity var(--wr-med) linear; }
+  .wr-hud__whisper, .wr-hud__coach { transition: opacity var(--wr-med) linear; }
 }

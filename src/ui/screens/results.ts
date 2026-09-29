@@ -1,6 +1,7 @@
 import type { ResultsModel } from '../../core/presentation'
 import { h } from '../dom'
 import { flightTime, humanizeId, recordState, shareUrl, type RecordState } from '../format'
+import { skyLine } from '../coach/sky'
 import { boardName } from '../tradeoffs'
 
 const HEADLINE = {
@@ -110,6 +111,7 @@ export const renderResults = (
           stat('Weather utilization', `${Math.round(s.weatherUtilization)}%`, s.weatherUtilization >= 50 ? 'good' : 'plain'),
         ),
       ),
+      h('p', 'wr-results__sky', skyLine(s)),
       h('ul', 'wr-boards', boards),
       unlocked,
       h('div', 'wr-share', shareStatus, fallback),

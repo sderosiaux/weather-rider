@@ -6,9 +6,16 @@ import { ATLAS_TILES } from '../textures'
 import type { Puff } from './layout'
 
 const STRIDE = 16
+/** Flow particles reach 9 km (src/flow FAR_DISTANCE); cores beyond that never need to occlude them. */
+const DEPTH_RANGE = 10_000
 
 export interface CloudLayer {
   readonly mesh: THREE.Mesh
+  /**
+   * Depth-only twin for the main scene: writes the depth of dense cloud cores near the camera so
+   * later transparents (flow particles, trails) are hidden behind clouds. Colour comes from `mesh`.
+   */
+  readonly depthMesh: THREE.Mesh
   setPuffs(puffs: readonly Puff[]): void
   /** Back-to-front sort and cull behind the camera. Call once per frame before rendering. */
   sort(camera: THREE.Camera): void
@@ -34,6 +41,7 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
       uAtlas: { value: atlas },
       uShadowColor: { value: PALETTE.cloudShadow.clone() },
       uAmbient: { value: PALETTE.cloudAmbient.clone() },
+      uDepthRange: { value: DEPTH_RANGE },
     },
     vertexShader: /* glsl */ `
       ${ATMOSPHERE_GLSL}
@@ -51,6 +59,9 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
       varying vec3 vFogTr;
       varying vec3 vFogCol;
       varying float vPhase;
+      varying vec3 vRel;
+      varying float vEdge;
+      uniform float uDepthRange;
 
       void main() {
         vec3 c = iPos.xyz;
@@ -86,12 +97,19 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
 
         // Fade puffs the camera is about to enter instead of letting them pop through the near plane.
         float radius = max(iPos.w, iShape.x);
+        #ifdef DEPTH_ONLY
+        // Depth is only needed where flow particles live: skip everything beyond the range.
+        if (camDist - radius > uDepthRange) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+        #endif
         float near = smoothstep(radius * 0.25, radius * 1.1, camDist);
         vLight = vec4(iAxis.w, iLight.x, h, iShape.w * near);
 
         vFogTr = fogTransmittance(wp);
         vFogCol = skyColor(normalize(wp - uCamPos));
         vPhase = dot(-toCam, uSunDir);
+        vRel = wp - uCamPos;
+        // Crisp silhouettes far away, soft up close (large near puffs otherwise read as hard discs).
+        vEdge = mix(0.95, 0.55, smoothstep(4000.0, 20000.0, camDist));
         gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
       }
     `,
@@ -112,6 +130,9 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
       varying vec3 vFogTr;
       varying vec3 vFogCol;
       varying float vPhase;
+      varying vec3 vRel;
+      varying float vEdge;
+      uniform vec3 uCamPos;
 
       float hg(float mu, float g) {
         float g2 = g * g;
@@ -120,12 +141,25 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
 
       void main() {
         vec2 p = vUv * 2.0 - 1.0;
+        // Rotated quad corners would sample the neighbouring atlas tile: keep to the inscribed circle.
+        if (dot(p, p) > 1.0) discard;
         float cs = cos(vRot), sn = sin(vRot);
         vec2 q = vec2(cs * p.x - sn * p.y, sn * p.x + cs * p.y);
         vec4 t = texture2D(uAtlas, vTile + (q * 0.5 + 0.5) / ${ATLAS_TILES}.0);
-        float density = t.r;
+        // Firm silhouettes: big clouds must read as solid shapes against the sky, not haze.
+        float density = smoothstep(0.02, vEdge, t.r);
         float alpha = density * vLight.w;
         if (alpha < 0.004) discard;
+        #ifdef DEPTH_ONLY
+        // Only dense cores occlude: soft edges keep showing what's behind them.
+        if (alpha < 0.55) discard;
+        gl_FragColor = vec4(0.0);
+        return;
+        #endif
+        // No depth buffer in the cloud pass: occlude by the sea plane along the view ray instead.
+        float dist = length(vRel);
+        float dirY = vRel.y / dist;
+        if (dirY < 0.0 && dist > uCamPos.y / -dirY) discard;
 
         // Soft pseudo-normal: only a hint of per-puff roundness. Cluster-level shade carries the volume,
         // otherwise every puff reads as its own bubble.
@@ -140,7 +174,7 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
         float lambert = dot(n, uSunDir) * 0.35 + 0.65;
         float sunVis = shade * lambert * (1.0 - 0.8 * dark);
         // Ambient: blue-violet in the belly, sky-lit on top.
-        vec3 ambient = mix(uShadowColor * (1.0 - 0.5 * dark), uAmbient, smoothstep(0.0, 0.9, h));
+        vec3 ambient = mix(uShadowColor * (1.0 - 0.5 * dark), uAmbient, smoothstep(0.0, 0.9, h) * (0.35 + 0.65 * shade));
         vec3 col = ambient + uSunColor * sunVis * 1.3;
         // Thin parts glow: light leaks through edges, strongest when looking toward the sun.
         float thin = 1.0 - smoothstep(0.05, 0.6, t.a);
@@ -154,12 +188,33 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
     `,
     transparent: true,
     depthWrite: false,
-    depthTest: true,
+    depthTest: false,
+    // Rendered alone into a cleared target: accumulate premultiplied colour and proper coverage.
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.SrcAlphaFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+    blendSrcAlpha: THREE.OneFactor,
+    blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
   })
 
   const mesh = new THREE.Mesh(geometry, material)
   mesh.frustumCulled = false
   mesh.renderOrder = 10
+
+  const depthMaterial = new THREE.ShaderMaterial({
+    uniforms: material.uniforms,
+    vertexShader: material.vertexShader,
+    fragmentShader: material.fragmentShader,
+    defines: { DEPTH_ONLY: '' },
+    colorWrite: false,
+    depthWrite: true,
+    depthTest: true,
+    transparent: true,
+  })
+  const depthMesh = new THREE.Mesh(geometry, depthMaterial)
+  depthMesh.frustumCulled = false
+  // After the cloud composite (10), before flow (12).
+  depthMesh.renderOrder = 11
 
   const bind = (): void => {
     interleaved = new THREE.InstancedInterleavedBuffer(sorted, STRIDE)
@@ -176,6 +231,7 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
 
   return {
     mesh,
+    depthMesh,
     setPuffs(puffs) {
       // Sort keys carry the instance index in 16 bits.
       count = Math.min(puffs.length, 65_535)
@@ -218,6 +274,7 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
       geometry.dispose()
       quad.dispose()
       material.dispose()
+      depthMaterial.dispose()
     },
   }
 }
