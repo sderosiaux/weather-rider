@@ -104,7 +104,7 @@ export interface Layout {
 const TAU = Math.PI * 2
 /** Horizontal reach of a column's influence, in radii. Must match the sampler's kernels. */
 export const COLUMN_REACH = 1.6
-/** Storm reach: the anvil is centred 0.9 R downwind with a 3.4 R semi-axis. */
+/** Storm reach: the anvil is centred 1.3 R downwind with a 3.0 R semi-axis (4.3 R), plus margin. */
 export const STORM_REACH = 4.35
 /** Storm core radius, in radii (violent turbulence inside). */
 export const STORM_CORE = 0.6
