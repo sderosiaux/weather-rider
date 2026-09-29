@@ -58,7 +58,6 @@ let nextHistory = 0
 
 function reset(): void {
   spec = aircraftById(aircraftSel.value)
-  const s0 = flightModel.initialState(spec, route)
   const starts: Record<string, { x: number; y: number; z: number }> = {
     route: route.start,
     updraft: v3(20_000, 3000, 0),
@@ -66,7 +65,7 @@ function reset(): void {
     downdraft: v3(45_000, 3000, 4000),
   }
   const pos = starts[scenarioSel.value] ?? route.start
-  state = pos === route.start ? s0 : flightModel.initialState(spec, { ...route, start: pos })
+  state = flightModel.initialState(spec, { ...route, start: pos }, weather)
   controls = { pitch: 0, roll: 0, yaw: 0, throttle: state.throttle }
   trace = []
   history = []

@@ -32,7 +32,7 @@ function windField(wind: (p: Vec3) => Vec3): WeatherField {
 
 describe('trim & still air', () => {
   it.each(AIRCRAFT.map((a) => [a.id, a] as const))('%s holds altitude ±50 m for 60 s when trimmed', (_id, spec) => {
-    const s0 = flightModel.initialState(spec, fixtureRoute)
+    const s0 = flightModel.initialState(spec, fixtureRoute, still)
     expect(s0.throttle).toBeGreaterThan(0)
     expect(s0.throttle).toBeLessThan(1)
     let dev = 0
@@ -44,9 +44,22 @@ describe('trim & still air', () => {
     expect(Math.abs(end.airspeed - spec.cruiseSpeedMs)).toBeLessThan(3)
   })
 
+  it.each(AIRCRAFT.map((a) => [a.id, a] as const))('%s starts trimmed in the fixture tailwind: ±50 m over 20 s', (_id, spec) => {
+    const weather = createFixtureWeather(1)
+    const s0 = flightModel.initialState(spec, fixtureRoute, weather)
+    expect(s0.vel.x).toBeCloseTo(spec.cruiseSpeedMs + 8, 6)
+    let dev = 0
+    const end = fly(spec, s0, () => NEUTRAL(s0.throttle), weather, fixtureRoute, 20, (s) => {
+      dev = Math.max(dev, Math.abs(s.pos.y - fixtureRoute.start.y))
+    })
+    expect(end.status).toBe('flying')
+    expect(dev).toBeLessThan(50)
+    expect(Math.abs(end.airspeed - spec.cruiseSpeedMs)).toBeLessThan(3)
+  })
+
   it('initial state points along startHeading', () => {
     const route: Route = { ...fixtureRoute, startHeading: v3(0, 0, -1) }
-    const s0 = flightModel.initialState(turboprop, route)
+    const s0 = flightModel.initialState(turboprop, route, still)
     expect(headingOf(s0.orientation)).toBeCloseTo(Math.PI / 2, 5)
     expect(s0.vel.z).toBeCloseTo(-turboprop.cruiseSpeedMs, 5)
   })
@@ -55,7 +68,7 @@ describe('trim & still air', () => {
 describe('weather is terrain', () => {
   it('fixture updraft lifts a slow-crossing turboprop ≥ 500 m with throttle 0.3', () => {
     // Crossing slowly like a glider pilot does: altitude gained ≈ ∫w dt, so time in the lift matters.
-    const start = at(flightModel.initialState(turboprop, fixtureRoute), v3(20_000, 3000, 0))
+    const start = at(flightModel.initialState(turboprop, fixtureRoute, still), v3(20_000, 3000, 0))
     const pilot = speedPilot(78, 0.3)
     const through = fly(turboprop, start, pilot, createFixtureWeather(1), fixtureRoute, 200)
     const around = fly(turboprop, start, pilot, uniformWeather(v3(8, 0, 0), 0.05, 1), fixtureRoute, 200)
@@ -65,14 +78,14 @@ describe('weather is terrain', () => {
 
   it('fixture updraft lifts the experimental ≥ 500 m on neutral stick, throttle 0.3', () => {
     const exp = aircraftById('experimental')
-    const start = at(flightModel.initialState(exp, fixtureRoute), v3(20_000, 3000, 0))
+    const start = at(flightModel.initialState(exp, fixtureRoute, still), v3(20_000, 3000, 0))
     const through = fly(exp, start, () => NEUTRAL(0.3), createFixtureWeather(1), fixtureRoute, 200)
     const around = fly(exp, start, () => NEUTRAL(0.3), uniformWeather(v3(8, 0, 0), 0.05, 1), fixtureRoute, 200)
     expect(through.pos.y - around.pos.y).toBeGreaterThanOrEqual(500)
   })
 
   it('rising air climbs and sinking air descends without touching throttle', () => {
-    const s0 = flightModel.initialState(turboprop, fixtureRoute)
+    const s0 = flightModel.initialState(turboprop, fixtureRoute, still)
     const pilot = () => NEUTRAL(s0.throttle)
     const up = fly(turboprop, s0, pilot, uniformWeather(v3(0, 10, 0)), fixtureRoute, 60)
     const down = fly(turboprop, s0, pilot, uniformWeather(v3(0, -10, 0)), fixtureRoute, 60)
@@ -81,19 +94,20 @@ describe('weather is terrain', () => {
   })
 
   it('tailwind raises ground speed, not airspeed', () => {
-    const s0 = flightModel.initialState(turboprop, fixtureRoute)
+    const s0 = flightModel.initialState(turboprop, fixtureRoute, still)
     const pilot = () => NEUTRAL(s0.throttle)
     const calm = fly(turboprop, s0, pilot, still, fixtureRoute, 60)
-    // Same air-relative start: ground velocity = air velocity + wind.
-    const s0w = { ...s0, vel: v3(s0.vel.x + 30, s0.vel.y, s0.vel.z) }
-    const tail = fly(turboprop, s0w, pilot, uniformWeather(v3(30, 0, 0)), fixtureRoute, 60)
+    const windy = uniformWeather(v3(30, 0, 0))
+    const s0w = flightModel.initialState(turboprop, fixtureRoute, windy)
+    expect(s0w.vel.x - s0.vel.x).toBeCloseTo(30, 9)
+    const tail = fly(turboprop, s0w, pilot, windy, fixtureRoute, 60)
     expect(Math.abs(tail.airspeed - calm.airspeed)).toBeLessThan(0.5)
     expect(tail.vel.x - calm.vel.x).toBeCloseTo(30, 0)
     expect(tail.pos.x - calm.pos.x).toBeGreaterThan(1700)
   })
 
   it('shear changes airspeed abruptly', () => {
-    const s0 = flightModel.initialState(turboprop, fixtureRoute)
+    const s0 = flightModel.initialState(turboprop, fixtureRoute, still)
     // Headwind jumps from 0 to 20 m/s across a 100 m gust front at x = 2000.
     const shear = windField((p) => v3(-20 * Math.min(1, Math.max(0, (p.x - 2000) / 100)), 0, 0))
     let before = 0
@@ -110,7 +124,7 @@ describe('handling', () => {
   it('turboprop turns faster than widebody', () => {
     const timeTo90 = (id: string): number => {
       const spec = aircraftById(id)
-      const s0 = flightModel.initialState(spec, fixtureRoute)
+      const s0 = flightModel.initialState(spec, fixtureRoute, still)
       const bankTo45: Pilot = (s) => ({ pitch: 0, roll: Math.max(-1, Math.min(1, (Math.PI / 4 - bankAngle(s.orientation)) * 3)), yaw: 0, throttle: s0.throttle })
       let t90 = Infinity
       fly(spec, s0, bankTo45, still, fixtureRoute, 120, (s) => {
@@ -124,7 +138,7 @@ describe('handling', () => {
   })
 
   it('a banked turn turns right, and neutral stick keeps altitude within reason', () => {
-    const s0 = flightModel.initialState(turboprop, fixtureRoute)
+    const s0 = flightModel.initialState(turboprop, fixtureRoute, still)
     let minY = Infinity
     const end = fly(turboprop, s0, (s) => ({ ...NEUTRAL(s0.throttle), roll: bankAngle(s.orientation) < 0.5 ? 1 : 0 }), still, fixtureRoute, 20, (s) => {
       minY = Math.min(minY, s.pos.y)
@@ -137,7 +151,7 @@ describe('handling', () => {
   it('turboprop cabin shakes more than widebody in the same turbulence', () => {
     const variance = (id: string): number => {
       const spec = aircraftById(id)
-      const s0 = flightModel.initialState(spec, fixtureRoute)
+      const s0 = flightModel.initialState(spec, fixtureRoute, still)
       const xs: number[] = []
       fly(spec, s0, () => NEUTRAL(s0.throttle), uniformWeather(v3(0, 0, 0), 0.6), fixtureRoute, 60, (s) => xs.push(s.cabinAccel))
       const m = xs.reduce((a, b) => a + b, 0) / xs.length
@@ -147,7 +161,7 @@ describe('handling', () => {
   })
 
   it('stalls below stall speed', () => {
-    const s0 = flightModel.initialState(turboprop, fixtureRoute)
+    const s0 = flightModel.initialState(turboprop, fixtureRoute, still)
     const slow = { ...s0, vel: v3(50, 0, 0), airspeed: 50, throttle: 0 }
     let stalled = false
     const end = fly(turboprop, slow, () => ({ pitch: 1, roll: 0, yaw: 0, throttle: 0 }), still, fixtureRoute, 10, (s) => {
@@ -163,28 +177,28 @@ describe('handling', () => {
 
 describe('terminal states', () => {
   it('crashes at y ≤ 0 and stays crashed', () => {
-    const s0 = at(flightModel.initialState(turboprop, fixtureRoute), v3(0, 400, 0))
+    const s0 = at(flightModel.initialState(turboprop, fixtureRoute, still), v3(0, 400, 0))
     const end = fly(turboprop, s0, () => ({ pitch: -1, roll: 0, yaw: 0, throttle: 0.5 }), still, fixtureRoute, 120)
     expect(end.status).toBe('crashed')
     expect(flightModel.step(turboprop, end, NEUTRAL(1), still, fixtureRoute, SIM_DT)).toBe(end)
   })
 
   it('arrives inside the gate cylinder and altitude window, sticky', () => {
-    const s0 = at(flightModel.initialState(turboprop, fixtureRoute), v3(fixtureRoute.gate.x - fixtureRoute.gateRadius - 1000, 3000, 0))
+    const s0 = at(flightModel.initialState(turboprop, fixtureRoute, still), v3(fixtureRoute.gate.x - fixtureRoute.gateRadius - 1000, 3000, 0))
     const end = fly(turboprop, s0, () => NEUTRAL(s0.throttle), still, fixtureRoute, 60)
     expect(end.status).toBe('arrived')
     expect(flightModel.step(turboprop, end, NEUTRAL(1), still, fixtureRoute, SIM_DT)).toBe(end)
   })
 
   it('does not arrive when passing above the altitude window', () => {
-    const s0 = at(flightModel.initialState(turboprop, fixtureRoute), v3(fixtureRoute.gate.x - 5000, fixtureRoute.gateMaxAlt + 500, 0))
+    const s0 = at(flightModel.initialState(turboprop, fixtureRoute, still), v3(fixtureRoute.gate.x - 5000, fixtureRoute.gateMaxAlt + 500, 0))
     let arrived = false
     fly(turboprop, s0, () => NEUTRAL(s0.throttle), still, fixtureRoute, 70, (s) => (arrived ||= s.status === 'arrived'))
     expect(arrived).toBe(false)
   })
 
   it('instant overstress when g exceeds 1.5× the limit', () => {
-    const s0 = flightModel.initialState(turboprop, fixtureRoute)
+    const s0 = flightModel.initialState(turboprop, fixtureRoute, still)
     // Max speed with the nose 20° above the flight path: far beyond the airframe limit.
     const yanked = { ...s0, vel: v3(turboprop.maxSpeedMs, 0, 0), orientation: qFromAxisAngle(v3(0, 0, 1), 0.35) }
     const next = flightModel.step(turboprop, yanked, NEUTRAL(0.5), still, fixtureRoute, SIM_DT)
@@ -194,13 +208,13 @@ describe('terminal states', () => {
   })
 
   it('sustained high g accumulates stress', () => {
-    const s0 = flightModel.initialState(turboprop, fixtureRoute)
+    const s0 = flightModel.initialState(turboprop, fixtureRoute, still)
     const end = fly(turboprop, s0, () => ({ pitch: 1, roll: 0, yaw: 0, throttle: 1 }), still, fixtureRoute, 4)
     expect(end.stress).toBeGreaterThan(0)
   })
 
   it('diving past max speed loads the airframe', () => {
-    const s0 = flightModel.initialState(turboprop, fixtureRoute)
+    const s0 = flightModel.initialState(turboprop, fixtureRoute, still)
     // Trimmed for 1 g at that speed, so only the overspeed can load the structure.
     const v = turboprop.maxSpeedMs * 1.5
     const dive = { ...s0, vel: v3(v, 0, 0), orientation: qFromAxisAngle(v3(0, 0, 1), trimLevel(turboprop, 3000, v).alpha) }
@@ -212,7 +226,7 @@ describe('terminal states', () => {
   })
 
   it('severe turbulence slowly fatigues the airframe to failure', () => {
-    const s0 = flightModel.initialState(turboprop, fixtureRoute)
+    const s0 = flightModel.initialState(turboprop, fixtureRoute, still)
     const severe = uniformWeather(v3(0, 0, 0), 1)
     let at60 = 0
     const end = fly(turboprop, s0, () => NEUTRAL(s0.throttle), severe, fixtureRoute, 900, (s) => {
@@ -226,7 +240,7 @@ describe('terminal states', () => {
 
 describe('fuel', () => {
   it('burns monotonically, faster at higher throttle', () => {
-    const s0 = flightModel.initialState(turboprop, fixtureRoute)
+    const s0 = flightModel.initialState(turboprop, fixtureRoute, still)
     let prev = s0.fuelKg
     let monotonic = true
     const rng = createRng(11)
@@ -245,7 +259,7 @@ describe('fuel', () => {
     const bestGlide = equilibriumAirspeed(spec, 2500, 0, emptyMass)
     // Start already at best-glide speed so no kinetic energy is cashed in during the measurement.
     const s0: AircraftState = {
-      ...flightModel.initialState(spec, fixtureRoute),
+      ...flightModel.initialState(spec, fixtureRoute, still),
       fuelKg: 0,
       vel: v3(bestGlide, 0, 0),
       orientation: qFromAxisAngle(v3(0, 0, 1), trimLevel(spec, 3000, bestGlide, emptyMass).alpha),
@@ -283,7 +297,7 @@ describe('determinism & robustness', () => {
   it('two runs with the same inputs are identical', () => {
     const run = () => {
       const trace: AircraftState[] = []
-      fly(turboprop, flightModel.initialState(turboprop, fixtureRoute), randomPilot(5), createFixtureWeather(9), fixtureRoute, 60, (s) => trace.push(s))
+      fly(turboprop, flightModel.initialState(turboprop, fixtureRoute, createFixtureWeather(9)), randomPilot(5), createFixtureWeather(9), fixtureRoute, 60, (s) => trace.push(s))
       return trace
     }
     expect(run()).toEqual(run())
@@ -297,7 +311,7 @@ describe('determinism & robustness', () => {
     for (const [seed, gain] of [[1, 0.3], [2, 1]] as const) {
       const pilot = randomPilot(seed * 100 + spec.id.length)
       let ok = true
-      fly(spec, flightModel.initialState(spec, { ...fixtureRoute, start: v3(0, 6000, 0) }), (s) => {
+      fly(spec, flightModel.initialState(spec, { ...fixtureRoute, start: v3(0, 6000, 0) }, createFixtureWeather(seed)), (s) => {
         const c = pilot(s)
         return { ...c, pitch: c.pitch * gain, roll: c.roll * gain, yaw: c.yaw * gain }
       }, createFixtureWeather(seed), fixtureRoute, 600, (s) => (ok &&= finite(s)))

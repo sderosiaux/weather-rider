@@ -102,7 +102,10 @@ export function headingOf(orientation: AircraftState['orientation']): number {
   return Math.atan2(-f.z, f.x)
 }
 
-export function initialState(spec: AircraftSpec, route: Route): AircraftState {
+/** Trimmed for cruise airspeed along startHeading; the ground velocity includes the wind at the start. */
+export function initialState(spec: AircraftSpec, route: Route, weather: WeatherField): AircraftState {
+  const w = weather.sample(route.start, 0, scratch).wind
+  const wind = v3(w.x, w.y, w.z)
   const h = normalize(v3(route.startHeading.x, 0, route.startHeading.z))
   const dir = length(h) > 0 ? h : BODY_FORWARD
   const trim = trimLevel(spec, route.start.y, spec.cruiseSpeedMs)
@@ -112,7 +115,7 @@ export function initialState(spec: AircraftSpec, route: Route): AircraftState {
   return {
     t: 0,
     pos: route.start,
-    vel: scale(dir, spec.cruiseSpeedMs),
+    vel: add(scale(dir, spec.cruiseSpeedMs), wind),
     orientation,
     angVel: v3(0, 0, 0),
     airspeed: spec.cruiseSpeedMs,
