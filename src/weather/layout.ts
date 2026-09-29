@@ -1,0 +1,456 @@
+// Deterministic generation of the weather layout from WeatherParams.
+// Produces both the public feature list and the compact specs the sampler evaluates.
+import { clamp, lerp, v3 } from '../core/math'
+import { createRng, hashInts } from '../core/rng'
+import type { Vec3, WeatherFeature, WeatherParams } from '../core/types'
+
+export const STORM = 0
+export const UPDRAFT = 1
+export const DOWNDRAFT = 2
+export const THERMAL = 3
+export type ColumnKind = typeof STORM | typeof UPDRAFT | typeof DOWNDRAFT | typeof THERMAL
+
+/** Vertical column (storm, updraft, downdraft, thermal) in sampler-ready form. */
+export interface ColumnSpec {
+  readonly kind: ColumnKind
+  readonly cx: number
+  readonly cz: number
+  readonly radius: number
+  readonly base: number
+  readonly top: number
+  /** Peak vertical wind (m/s), negative for sinks. */
+  readonly strength: number
+  /** 0..1 scale on the turbulence this column produces. */
+  readonly intensity: number
+  /** Storm: unit xz direction of the strongest updraft flank. */
+  readonly flankX: number
+  readonly flankZ: number
+  /** Storm: unit xz direction of the upper-level wind (anvil + rear downdraft side). */
+  readonly anvilX: number
+  readonly anvilZ: number
+  /** Updraft / thermal: 1 if it carries a cumulus cap. */
+  readonly cumulus: number
+  /** Horizontal distance beyond which the column contributes nothing. */
+  readonly reach: number
+  readonly yMin: number
+  readonly yMax: number
+}
+
+/**
+ * Jet core centerline as a smooth function of x (jets are westerly), so the tangent
+ * and lateral offset stay continuous everywhere — polyline corners would make wind jumps.
+ */
+export interface JetSpec {
+  readonly z0: number
+  readonly a1: number
+  readonly k1: number
+  readonly p1: number
+  readonly a2: number
+  readonly k2: number
+  readonly p2: number
+  readonly y0: number
+  readonly ay: number
+  readonly ky: number
+  readonly py: number
+  /** Horizontal half-width (m) — also the public feature radius. */
+  readonly rh: number
+  /** Vertical half-thickness (m). */
+  readonly rv: number
+  readonly speed: number
+  /** Peak turbulence in the shear layers above/below the core. */
+  readonly shearTurb: number
+  /** Along-jet streak modulation. */
+  readonly ks: number
+  readonly ps: number
+}
+
+/** Background traffic flying a straight line; its wake trails behind it for `life` seconds. */
+export interface WakeSpec {
+  readonly ax: number
+  readonly az: number
+  readonly dx: number
+  readonly dz: number
+  readonly length: number
+  readonly alt: number
+  /** Vortex core radius (m). */
+  readonly rc: number
+  /** Peak tangential velocity of each vortex (m/s). */
+  readonly vmax: number
+  readonly span: number
+  readonly speed: number
+  /** Peak turbulence at the vortex cores. */
+  readonly turb: number
+  readonly life: number
+  readonly phase: number
+}
+
+export interface BackgroundSpec {
+  readonly speedScale: number
+  readonly p1: number
+  readonly p2: number
+  readonly p3: number
+  /** Turbulence of undisturbed air at this severity. */
+  readonly baseTurb: number
+}
+
+export interface Layout {
+  readonly background: BackgroundSpec
+  readonly columns: readonly ColumnSpec[]
+  readonly jets: readonly JetSpec[]
+  readonly wakes: readonly WakeSpec[]
+  readonly features: readonly WeatherFeature[]
+}
+
+const TAU = Math.PI * 2
+const BG_K1 = TAU / 140_000
+const BG_K2 = TAU / 90_000
+const BG_K3 = TAU / 60_000
+
+/** Direction (rad, 0 = +x, positive toward +z) of the large-scale westerly flow. */
+export function backgroundAngle(bg: BackgroundSpec, x: number, z: number, t: number): number {
+  return 0.3 * Math.sin(x * BG_K1 + bg.p1 + t * 0.0006) * Math.cos(z * BG_K2 + bg.p2) + 0.12 * Math.sin((x - z) * BG_K3 + bg.p3)
+}
+
+/** Westerly speed profile: ≈5 m/s at the surface, ≈30 m/s at 10 km. */
+export function backgroundSpeed(y: number): number {
+  const s = y / 7000
+  return 5 + 28 * (1 - Math.exp(-s * s))
+}
+
+/** Lift scale: calm (≤ 3 m/s) at severity 0, ≥ 13 m/s from severity 0.2, 26 m/s at 1. */
+function liftScale(sev: number): number {
+  return sev < 0.2 ? lerp(2.4, 13, sev / 0.2) : lerp(13, 26, (sev - 0.2) / 0.8)
+}
+
+interface Frame {
+  readonly ax: number
+  readonly az: number
+  readonly ux: number
+  readonly uz: number
+  readonly len: number
+  readonly minX: number
+  readonly maxX: number
+  readonly minZ: number
+  readonly maxZ: number
+}
+
+export function generateLayout(params: WeatherParams): Layout {
+  const sev = clamp(params.severity, 0, 1)
+  const { boundsMin: bmin, boundsMax: bmax } = params
+  // Independent streams per category: tweaking one population never reshuffles the others.
+  const rngFor = (tag: number) => createRng(hashInts(params.seed, tag))
+
+  const [c0, c1] = params.corridor
+  let ux = c1.x - c0.x
+  let uz = c1.z - c0.z
+  let len = Math.hypot(ux, uz)
+  if (len < 1) {
+    ux = 1
+    uz = 0
+    len = bmax.x - bmin.x
+  } else {
+    ux /= len
+    uz /= len
+  }
+  const margin = 2000
+  const fr: Frame = {
+    ax: c0.x,
+    az: c0.z,
+    ux,
+    uz,
+    len,
+    minX: bmin.x + margin,
+    maxX: bmax.x - margin,
+    minZ: bmin.z + margin,
+    maxZ: bmax.z - margin,
+  }
+  /** Point at fraction `along` of the corridor, offset `lateral` meters to its right. */
+  const onCorridor = (along: number, lateral: number): [number, number] => [
+    clamp(fr.ax + fr.ux * fr.len * along - fr.uz * lateral, fr.minX, fr.maxX),
+    clamp(fr.az + fr.uz * fr.len * along + fr.ux * lateral, fr.minZ, fr.maxZ),
+  ]
+  const anywhere = (r: () => number): [number, number] => [lerp(fr.minX, fr.maxX, r()), lerp(fr.minZ, fr.maxZ, r())]
+  const ceiling = bmax.y - 500
+
+  const rb = rngFor(0xb6)
+  const background: BackgroundSpec = {
+    speedScale: 0.85 + 0.3 * sev,
+    p1: rb() * TAU,
+    p2: rb() * TAU,
+    p3: rb() * TAU,
+    baseTurb: 0.03 + 0.09 * sev,
+  }
+  const upperWind = (x: number, z: number): [number, number] => {
+    const a = backgroundAngle(background, x, z, 0)
+    return [Math.cos(a), Math.sin(a)]
+  }
+
+  const columns: ColumnSpec[] = []
+  const features: WeatherFeature[] = []
+  const lift = liftScale(sev)
+
+  // Footprints of placed big columns: overlapping lift would stack into unflyable 50 m/s columns.
+  const placed: [number, number, number][] = []
+  /** Best of a few candidates from `pick`, maximizing clearance to already placed columns. */
+  const place = (pick: () => [number, number], footprint: number): [number, number] => {
+    let best: [number, number] = pick()
+    let bestClear = -Infinity
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const c = attempt === 0 ? best : pick()
+      let clear = Infinity
+      for (const [px, pz, pr] of placed) clear = Math.min(clear, Math.hypot(c[0] - px, c[1] - pz) - pr - footprint)
+      if (clear > bestClear) {
+        best = c
+        bestClear = clear
+      }
+      if (clear >= 0) break
+    }
+    placed.push([best[0], best[1], footprint])
+    return best
+  }
+
+  const pushColumn = (spec: Omit<ColumnSpec, 'reach' | 'yMin' | 'yMax'>, id: string) => {
+    const isStorm = spec.kind === STORM
+    const col: ColumnSpec = {
+      ...spec,
+      reach: isStorm ? spec.radius * 3.25 : spec.radius * 1.6,
+      yMin: spec.base - (isStorm ? 1500 : 500) - (spec.kind === THERMAL ? 400 : 0),
+      yMax: spec.top + (isStorm ? 1500 : 800),
+    }
+    columns.push(col)
+    const center = v3(col.cx, (col.base + col.top) / 2, col.cz)
+    const common = { id, center, radius: col.radius, base: col.base, top: col.top, strength: col.strength }
+    const kind = spec.kind === STORM ? 'storm' : spec.kind === UPDRAFT ? 'updraft' : spec.kind === DOWNDRAFT ? 'downdraft' : 'thermal'
+    features.push({ kind, ...common })
+  }
+
+  // ── Storms: biased along the corridor, count and strength scale with severity.
+  const rs = rngFor(0x5707)
+  const nearStorms = sev < 0.1 ? 0 : Math.round(sev * 4 + rs() * 1.5)
+  const farStorms = Math.floor(sev * 3 * rs())
+  for (let i = 0; i < nearStorms + farStorms; i++) {
+    const near = i < nearStorms
+    const radius = 3000 + 3500 * rs() * (0.6 + 0.4 * sev)
+    const [cx, cz] = place(() => (near ? onCorridor(0.12 + (0.76 * (i + rs())) / nearStorms, (rs() * 2 - 1) * 14_000) : anywhere(rs)), radius * 1.3)
+    const flank = rs() * TAU
+    const [wx, wz] = upperWind(cx, cz)
+    pushColumn(
+      {
+        kind: STORM,
+        cx,
+        cz,
+        radius,
+        base: 600 + 800 * rs(),
+        top: Math.min(ceiling, 9500 + 3500 * sev * rs()),
+        strength: (12 + 16 * sev) * (0.85 + 0.3 * rs()),
+        intensity: 0.65 + 0.35 * sev,
+        flankX: Math.cos(flank),
+        flankZ: Math.sin(flank),
+        anvilX: wx,
+        anvilZ: wz,
+        cumulus: 1,
+      },
+      `storm-${i + 1}`,
+    )
+  }
+
+  // ── Updrafts: a guaranteed set of lift columns along the corridor, plus scattered extras.
+  const ru = rngFor(0x0bd)
+  const nLift = 2 + Math.round(sev * 3)
+  const nExtra = Math.round(sev * 4 * ru())
+  for (let i = 0; i < nLift + nExtra; i++) {
+    const guaranteed = i < nLift
+    const radius = 1800 + 1700 * ru()
+    const [cx, cz] = place(() => (guaranteed ? onCorridor(0.1 + (0.8 * (i + ru())) / nLift, (ru() * 2 - 1) * 9000) : anywhere(ru)), radius * 1.4)
+    pushColumn(
+      {
+        kind: UPDRAFT,
+        cx,
+        cz,
+        radius,
+        base: 200 + 600 * ru(),
+        top: Math.min(ceiling, 6800 + 3700 * ru()),
+        strength: lift * (guaranteed ? 1 + 0.25 * ru() : 0.6 + 0.5 * ru()),
+        intensity: 0.4 + 0.4 * sev,
+        flankX: 0,
+        flankZ: 0,
+        anvilX: 0,
+        anvilZ: 0,
+        cumulus: 1,
+      },
+      `updraft-${i + 1}`,
+    )
+  }
+
+  // ── Downdrafts: the price of a careless line.
+  const rd = rngFor(0xd0d)
+  const nSink = 1 + Math.round(sev * 4)
+  for (let i = 0; i < nSink; i++) {
+    const radius = 2000 + 2000 * rd()
+    const [cx, cz] = place(() => onCorridor(0.1 + 0.85 * rd(), (rd() * 2 - 1) * 20_000), radius * 1.4)
+    pushColumn(
+      {
+        kind: DOWNDRAFT,
+        cx,
+        cz,
+        radius,
+        base: 0,
+        top: Math.min(ceiling, 4000 + 5000 * rd()),
+        strength: -lift * (0.55 + 0.35 * rd()),
+        intensity: 0.35 + 0.4 * sev,
+        flankX: 0,
+        flankZ: 0,
+        anvilX: 0,
+        anvilZ: 0,
+        cumulus: 0,
+      },
+      `downdraft-${i + 1}`,
+    )
+  }
+
+  // ── Thermals: gentle, many, low.
+  const rt = rngFor(0x7e4)
+  const areaKm2 = ((fr.maxX - fr.minX) * (fr.maxZ - fr.minZ)) / 1e6
+  const nThermals = Math.round(clamp(areaKm2 / 110, 20, 140))
+  for (let i = 0; i < nThermals; i++) {
+    const [cx, cz] = anywhere(rt)
+    pushColumn(
+      {
+        kind: THERMAL,
+        cx,
+        cz,
+        radius: 500 + 800 * rt(),
+        base: 0,
+        top: 1300 + 1600 * rt(),
+        strength: (1.2 + 1.2 * rt()) * (1 + 1.1 * sev),
+        intensity: 0.3,
+        flankX: 0,
+        flankZ: 0,
+        anvilX: 0,
+        anvilZ: 0,
+        cumulus: rt() < 0.55 ? 1 : 0,
+      },
+      `thermal-${i + 1}`,
+    )
+  }
+
+  // ── Jet streams: westerly, meandering across the corridor at 9–12 km.
+  const rj = rngFor(0x1e7)
+  const nJets = 1 + (rj() < 0.35 + 0.4 * sev ? 1 : 0)
+  const jets: JetSpec[] = []
+  const midZ = fr.az + fr.uz * fr.len * 0.5
+  for (let i = 0; i < nJets; i++) {
+    const k1 = TAU / (70_000 + 90_000 * rj())
+    const k2 = TAU / (25_000 + 25_000 * rj())
+    // Slopes capped so the jet keeps a strong eastward component everywhere.
+    const a1 = Math.min(4000 + 14_000 * rj(), 0.45 / k1)
+    const a2 = Math.min(1500 + 3000 * rj(), 0.12 / k2)
+    const z0 = i === 0 ? midZ + (rj() * 2 - 1) * 6000 : lerp(fr.minZ, fr.maxZ, rj())
+    const jet: JetSpec = {
+      z0,
+      a1,
+      k1,
+      p1: rj() * TAU,
+      a2,
+      k2,
+      p2: rj() * TAU,
+      y0: Math.min(ceiling - 1500, 9900 + 1300 * rj()),
+      ay: 250 + 450 * rj(),
+      ky: TAU / (80_000 + 120_000 * rj()),
+      py: rj() * TAU,
+      rh: 7000 + 5000 * rj(),
+      rv: 1400 + 500 * rj(),
+      speed: 40 + 50 * (0.2 + 0.8 * sev) * (0.6 + 0.4 * rj()),
+      shearTurb: 0.2 + 0.45 * sev,
+      ks: TAU / (40_000 + 40_000 * rj()),
+      ps: rj() * TAU,
+    }
+    jets.push(jet)
+    const path: Vec3[] = []
+    for (let x = bmin.x; x <= bmax.x + 1; x += 4000) path.push(v3(x, jetY(jet, x), jetZ(jet, x)))
+    features.push({ kind: 'jetstream', id: `jet-${i + 1}`, path, radius: jet.rh, speed: jet.speed })
+    let zLo = Infinity
+    let zHi = -Infinity
+    for (const q of path) {
+      zLo = Math.min(zLo, q.z - jet.rh)
+      zHi = Math.max(zHi, q.z + jet.rh)
+    }
+    for (const side of [-1, 1] as const) {
+      features.push({
+        kind: 'shear',
+        id: `shear-${i + 1}-${side < 0 ? 'low' : 'high'}`,
+        altitude: jet.y0 + side * jet.rv * 0.55,
+        thickness: jet.rv * 0.6,
+        deltaWind: v3(-side * jet.speed, 0, 0),
+        extentMin: v3(bmin.x, jet.y0 - jet.ay - jet.rv, zLo),
+        extentMax: v3(bmax.x, jet.y0 + jet.ay + jet.rv, zHi),
+      })
+    }
+  }
+
+  // ── Wake turbulence from background traffic crossing the corridor region.
+  const rw = rngFor(0x3a4e)
+  const nWakes = 2 + (rw() < 0.5 ? 1 : 0)
+  const wakes: WakeSpec[] = []
+  for (let i = 0; i < nWakes; i++) {
+    const [px, pz] = onCorridor(0.2 + 0.6 * rw(), (rw() * 2 - 1) * 10_000)
+    const heading = rw() * TAU
+    const dx = Math.cos(heading)
+    const dz = Math.sin(heading)
+    const [sMin, sMax] = clipLine(px, pz, dx, dz, bmin.x, bmax.x, bmin.z, bmax.z)
+    const speed = 230
+    const life = 75 + 45 * rw()
+    const length = sMax - sMin
+    const rc = 70 + 40 * rw()
+    const wake: WakeSpec = {
+      ax: px + dx * sMin,
+      az: pz + dz * sMin,
+      dx,
+      dz,
+      length,
+      alt: 6000 + 5500 * rw(),
+      rc,
+      // Peak downwash between the vortices is ≈1.93·vmax: gentle on calm days, vicious at severity 1.
+      vmax: (lerp(3.4, 18, sev) * (0.85 + 0.25 * rw())) / 1.93,
+      span: rc * 2.6,
+      speed,
+      turb: 0.3 + 0.55 * sev,
+      life,
+      phase: rw() * (length + speed * life),
+    }
+    wakes.push(wake)
+    features.push({
+      kind: 'wake',
+      id: `wake-${i + 1}`,
+      path: [v3(wake.ax, wake.alt, wake.az), v3(wake.ax + dx * length, wake.alt, wake.az + dz * length)],
+      radius: rc,
+      strength: wake.vmax,
+    })
+  }
+
+  return { background, columns, jets, wakes, features }
+}
+
+export function jetZ(j: JetSpec, x: number): number {
+  return j.z0 + j.a1 * Math.sin(j.k1 * x + j.p1) + j.a2 * Math.sin(j.k2 * x + j.p2)
+}
+
+export function jetY(j: JetSpec, x: number): number {
+  return j.y0 + j.ay * Math.sin(j.ky * x + j.py)
+}
+
+/** Parameter range [sMin, sMax] of the line p + s·d inside the xz rectangle. */
+function clipLine(px: number, pz: number, dx: number, dz: number, x0: number, x1: number, z0: number, z1: number): [number, number] {
+  let lo = -Infinity
+  let hi = Infinity
+  const slab = (p: number, d: number, a: number, b: number) => {
+    if (Math.abs(d) < 1e-9) return
+    const s0 = (a - p) / d
+    const s1 = (b - p) / d
+    lo = Math.max(lo, Math.min(s0, s1))
+    hi = Math.min(hi, Math.max(s0, s1))
+  }
+  slab(px, dx, x0, x1)
+  slab(pz, dz, z0, z1)
+  return [lo, hi]
+}
