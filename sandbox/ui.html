@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Weather Rider · UI sandbox</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; }
+      #stage { position: fixed; inset: 0; background: var(--wr-sky-bright); }
+      #stage.storm { background: var(--wr-sky-storm); }
+      /* Fake cloud masses so readability is tested over mixed brightness, not a flat gradient. */
+      .cloud { position: absolute; border-radius: 50%; filter: blur(28px); pointer-events: none; }
+      #stage .cloud { background: var(--wr-frost-strong); }
+      #stage.storm .cloud { background: var(--wr-ink); opacity: 0.8; }
+      #stage.storm .cloud.lit { background: var(--wr-ink-faint); opacity: 0.7; }
+      #hud, #screens { position: absolute; inset: 0; }
+      #screens { pointer-events: none; }
+      #screens > * { pointer-events: auto; }
+      #dev {
+        position: fixed; left: 50%; top: 96px; transform: translateX(-50%); z-index: 50;
+        display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center;
+        font: 12px var(--wr-font); color: var(--wr-ink);
+        background: var(--wr-frost-strong); border: 1px solid var(--wr-hairline); border-radius: 10px; padding: 6px 8px;
+      }
+      #dev button { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--wr-hairline-strong); background: var(--wr-surface); cursor: pointer; }
+      #dev output { font-variant-numeric: tabular-nums; min-width: 260px; color: var(--wr-ink-soft); }
+      body.shot #dev { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <div class="cloud" style="left:8%;top:12%;width:38vw;height:22vh"></div>
+      <div class="cloud lit" style="left:58%;top:54%;width:44vw;height:30vh"></div>
+      <div class="cloud" style="left:-6%;top:62%;width:34vw;height:34vh"></div>
+      <div class="cloud lit" style="left:66%;top:6%;width:28vw;height:18vh"></div>
+      <div id="hud"></div>
+      <div id="screens"></div>
+    </div>
+    <div id="dev"></div>
+    <script type="module" src="./ui.ts"></script>
+  </body>
+</html>

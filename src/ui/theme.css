@@ -1,0 +1,96 @@
+/* Weather Rider design tokens. Components read only these properties. */
+:root {
+  /* Type */
+  --wr-font: 'Avenir Next', 'Avenir', 'Segoe UI Variable Text', 'Segoe UI', 'Helvetica Neue', system-ui, sans-serif;
+  --wr-font-display: 'Avenir Next', 'Avenir', 'Segoe UI Variable Display', 'Segoe UI', 'Helvetica Neue', system-ui, sans-serif;
+  --wr-weight-thin: 200;
+  --wr-weight-light: 300;
+  --wr-weight-regular: 400;
+  --wr-weight-medium: 500;
+  --wr-weight-strong: 600;
+  --wr-text-2xs: 10px;
+  --wr-text-xs: 11px;
+  --wr-text-sm: 13px;
+  --wr-text-md: 15px;
+  --wr-text-lg: 19px;
+  --wr-text-xl: 28px;
+  --wr-text-2xl: 40px;
+  --wr-text-3xl: clamp(44px, 7vw, 88px);
+  --wr-tracking-wide: 0.14em;
+  --wr-tracking-title: 0.32em;
+
+  /* Ink: a deep stratospheric slate, never pure black */
+  --wr-ink: #15263a;
+  --wr-ink-soft: #3c5068;
+  --wr-ink-faint: #71849a;
+  --wr-ink-ghost: rgba(21, 38, 58, 0.34);
+  --wr-hairline: rgba(21, 38, 58, 0.14);
+  --wr-hairline-strong: rgba(21, 38, 58, 0.26);
+  --wr-on-signal: #ffffff;
+
+  /* Frost: translucent panels readable over bright sky and storm */
+  --wr-frost: rgba(246, 249, 252, 0.7);
+  --wr-frost-strong: rgba(248, 250, 253, 0.86);
+  --wr-frost-edge: rgba(255, 255, 255, 0.72);
+  --wr-frost-blur: blur(18px) saturate(1.3) brightness(1.08);
+  --wr-shadow-float: 0 1px 1px rgba(15, 30, 50, 0.05), 0 8px 28px rgba(15, 30, 50, 0.14);
+  --wr-shadow-lift: 0 2px 4px rgba(15, 30, 50, 0.06), 0 18px 48px rgba(15, 30, 50, 0.18);
+  --wr-sil-shadow: drop-shadow(0 6px 6px rgba(15, 30, 50, 0.16));
+  --wr-surface: #fbfcfe;
+  --wr-surface-sunk: rgba(21, 38, 58, 0.04);
+  --wr-scrim: linear-gradient(100deg, rgba(236, 242, 248, 0.9) 0%, rgba(236, 242, 248, 0.72) 45%, rgba(236, 242, 248, 0.4) 100%);
+  --wr-scrim-blur: blur(6px);
+  --wr-spotlight: radial-gradient(60% 46% at 50% 58%, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0) 100%);
+
+  /* Signal colors, used only to carry meaning */
+  --wr-calm: #237a70;        /* comfort, ok, ahead of ghost, benefit */
+  --wr-calm-soft: rgba(35, 122, 112, 0.14);
+  --wr-caution: #a96c0a;     /* moderate turbulence, cost of a tradeoff, behind ghost */
+  --wr-caution-soft: rgba(190, 128, 20, 0.15);
+  --wr-danger: #cc3d33;      /* stall, stress, extreme */
+  --wr-danger-soft: rgba(204, 61, 51, 0.14);
+  --wr-jet: #3d63d6;         /* riding a jet stream: the celebrated moment */
+  --wr-jet-soft: rgba(61, 99, 214, 0.14);
+  --wr-record: #7a4fd0;      /* new personal record */
+  --wr-record-soft: rgba(122, 79, 208, 0.13);
+
+  /* Accent for primary actions */
+  --wr-action: #15263a;
+  --wr-action-ink: #f6f9fc;
+  --wr-focus: #3d63d6;
+
+  /* Livery palette offered in the hangar */
+  --wr-livery-1: #f4f6f8;
+  --wr-livery-2: #1f3b5c;
+  --wr-livery-3: #c73a36;
+  --wr-livery-4: #e3a92b;
+  --wr-livery-5: #237a70;
+  --wr-livery-6: #6d5bd0;
+  --wr-livery-7: #2b2d31;
+  --wr-livery-8: #9fc3e6;
+
+  /* Sandbox skies (backgrounds only) */
+  --wr-sky-bright: linear-gradient(180deg, #5f9fd9 0%, #9cc9ef 45%, #e6f1fa 78%, #fbf6ec 100%);
+  --wr-sky-storm: radial-gradient(120% 80% at 70% 20%, #5a6676 0%, #343d4a 40%, #1b212b 100%);
+
+  /* Space + shape */
+  --wr-space-1: 4px;
+  --wr-space-2: 8px;
+  --wr-space-3: 12px;
+  --wr-space-4: 16px;
+  --wr-space-5: 24px;
+  --wr-space-6: 32px;
+  --wr-space-7: 48px;
+  --wr-space-8: 72px;
+  --wr-edge: clamp(14px, 2.2vw, 28px);
+  --wr-radius-sm: 8px;
+  --wr-radius-md: 14px;
+  --wr-radius-lg: 22px;
+  --wr-radius-pill: 999px;
+
+  /* Motion */
+  --wr-ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --wr-fast: 140ms;
+  --wr-med: 260ms;
+  --wr-slow: 600ms;
+}
