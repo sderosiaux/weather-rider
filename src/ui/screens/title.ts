@@ -1,4 +1,4 @@
-import type { TitleCallbacks } from '../../core/presentation'
+import type { TitleCallbacks, UnlockHints } from '../../core/presentation'
 import type { AircraftSpec, DailyWeather, PlayerProgress, Route } from '../../core/types'
 import { h } from '../dom'
 import { groupThousands, severityBucket } from '../format'
@@ -72,6 +72,7 @@ export const renderTitle = (
   daily: DailyWeather,
   progress: PlayerProgress,
   aircraft: readonly AircraftSpec[],
+  unlockHints: UnlockHints,
   cb: TitleCallbacks,
   memory: TitleMemory,
 ): HTMLElement => {
@@ -115,11 +116,9 @@ export const renderTitle = (
     return { r, btn }
   })
 
-  let nextShown = false
   const planeButtons = aircraft.map((a) => {
     const isUnlocked = unlocked.has(a.id)
-    const isNext = !isUnlocked && !nextShown
-    if (isNext) nextShown = true
+    const hint = unlockHints[a.id] ?? 'Locked'
     const btn = h(
       'button',
       {
@@ -127,11 +126,11 @@ export const renderTitle = (
         type: 'button',
         'aria-pressed': 'false',
         'aria-disabled': isUnlocked ? null : 'true',
-        title: isUnlocked ? a.name : `${a.name}: locked`,
+        title: isUnlocked ? a.name : `${a.name}: ${hint}`,
       },
       h('span', 'wr-plane__art', aircraftSilhouette(a.class, liveryFill(progress, a.id))),
       h('span', 'wr-plane__name', a.name),
-      h('span', 'wr-plane__hint', isUnlocked ? a.class : isNext ? 'Next to unlock' : 'Locked'),
+      h('span', 'wr-plane__hint', isUnlocked ? a.class : hint),
     )
     if (isUnlocked)
       btn.addEventListener('click', () => {

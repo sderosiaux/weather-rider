@@ -111,8 +111,10 @@ export const createHud: CreateHud = (root: HTMLElement): Hud => {
   // ── Center: stall + weather whisper
   const stall = h('div', 'wr-hud__stall', 'STALL', h('small', {}, 'lower the nose, add power'))
   const whisper = h('div', 'wr-hud__whisper')
+  // Shown by CSS from <html data-wr-stick="disarmed"> (published by the input module).
+  const takeControls = h('div', 'wr-hud__take', h('b', {}, 'Click to take the controls'), h('span', {}, 'or fly with W A S D'))
 
-  const el = h('div', { class: 'wr-hud', 'aria-hidden': 'true' }, top, air, speed, altitude, stall, whisper, engine, gate, cabin)
+  const el = h('div', { class: 'wr-hud', 'aria-hidden': 'true' }, top, air, speed, altitude, stall, whisper, takeControls, engine, gate, cabin)
   root.appendChild(el)
 
   let lastDominant: WeatherFeatureKind | null | undefined
@@ -184,6 +186,7 @@ export const createHud: CreateHud = (root: HTMLElement): Hud => {
     const lit = lvl === 'smooth' ? 0 : Math.min(4, Math.max(1, Math.ceil(m.turbulence * 4)))
     turbBars.forEach((b, i) => w.flag(b, 'is-lit', i < lit))
     w.text(turbWord, lvl)
+    w.flag(el, 'is-heavy', m.stalled || m.dominant === 'storm' || lvl === 'moderate' || lvl === 'severe')
     w.flag(air, 'is-moderate', lvl === 'moderate')
     w.flag(air, 'is-severe', lvl === 'severe')
 

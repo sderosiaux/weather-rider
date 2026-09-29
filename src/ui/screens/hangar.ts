@@ -1,5 +1,5 @@
 import type { HangarModel } from '../../core/presentation'
-import type { AircraftSpec, PlayerProgress, Upgrade } from '../../core/types'
+import type { AircraftSpec, PlayerProgress, Upgrade, UpgradeSlot } from '../../core/types'
 import { h } from '../dom'
 import { aircraftSilhouette } from '../silhouette'
 import {
@@ -15,6 +15,7 @@ import {
 
 export interface HangarCallbacks {
   onEquip(aircraftId: string, upgradeId: string): void
+  onUnequip(aircraftId: string, slot: UpgradeSlot): void
   onLivery(aircraftId: string, color: string): void
   onBack(): void
 }
@@ -76,7 +77,7 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
           },
           h('span', 'wr-trophy__plinth', aircraftSilhouette(a.class, liveryOf(a.id))),
           h('span', 'wr-trophy__name', a.name),
-          h('span', 'wr-trophy__meta', locked ? 'Not yet earned' : a.class),
+          h('span', 'wr-trophy__meta', locked ? (model.unlockHints[a.id] ?? 'Not yet earned') : a.class),
         )
         tile.addEventListener('click', () => {
           selected = a
@@ -95,6 +96,30 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
     const effective = applyUpgrades(a, equipped)
     const diff = loadoutDiff(a, effective)
 
+    const stockOption = (a: AircraftSpec, slot: UpgradeSlot, owned: boolean): HTMLElement => {
+      const on = !model.upgrades.some((u) => u.slot === slot && equippedIds(a.id).includes(u.id))
+      const card = h(
+        'button',
+        {
+          class: `wr-upg wr-upg--stock${on ? ' is-on' : ''}`,
+          type: 'button',
+          'data-key': `stock:${slot}`,
+          'aria-pressed': String(on),
+          disabled: !owned,
+        },
+        h('span', 'wr-upg__head', h('span', 'wr-upg__name', 'Stock'), on ? h('span', 'wr-upg__tag', 'Fitted') : null),
+        h('span', 'wr-upg__desc', 'As the factory built it. The baseline every upgrade is measured against.'),
+      )
+      card.addEventListener('click', () => {
+        if (!owned || on) return
+        const kept = equippedIds(a.id).filter((id) => model.upgrades.find((x) => x.id === id)?.slot !== slot)
+        progress = { ...progress, loadouts: { ...progress.loadouts, [a.id]: kept } }
+        cb.onUnequip(a.id, slot)
+        render()
+      })
+      return card
+    }
+
     const slots = SLOT_ORDER.map((slot) => {
       const options = model.upgrades.filter((u) => u.slot === slot)
       if (options.length === 0) return null
@@ -105,6 +130,7 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
         h(
           'div',
           'wr-slot__options',
+          stockOption(a, slot, owned),
           options.map((u) => {
             const available = isUpgradeUnlocked(u, progress)
             const on = equippedIds(a.id).includes(u.id)
@@ -161,7 +187,14 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
         'div',
         'wr-hangar__fit',
         h('h2', 'wr-sheet__title', owned ? `Fit out the ${a.name}` : `${a.name} is not in your hangar yet`),
-        owned ? null : h('p', 'wr-hangar__locked-note', 'Keep flying the daily routes to earn it. You can already study its upgrades.'),
+        owned
+          ? null
+          : h(
+              'p',
+              'wr-hangar__locked-note',
+              model.unlockHints[a.id] ? `To earn it: ${model.unlockHints[a.id]}. ` : '',
+              'You can already study its upgrades.',
+            ),
         slots,
       ),
       h(

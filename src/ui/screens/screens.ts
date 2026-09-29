@@ -3,6 +3,7 @@ import { h } from '../dom'
 import { renderHangar, type HangarMemory } from './hangar'
 import { renderResults } from './results'
 import { renderTitle, type TitleMemory } from './title'
+import { MENU_EVENT } from '../input/stick'
 import './screens.css'
 
 export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
@@ -23,6 +24,9 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
 
   const mount = (screen: HTMLElement, focusSelector: string, escape: (() => void) | null): void => {
     // Re-showing the same screen (e.g. hangar after an equip) keeps scroll position and keyboard focus.
+    // Menus need a visible cursor, and the next flight must start with the controls released.
+    if (document.pointerLockElement) document.exitPointerLock()
+    window.dispatchEvent(new Event(MENU_EVENT))
     const sameKind = layer.firstElementChild?.getAttribute('aria-label') === screen.getAttribute('aria-label')
     const scroll = sameKind ? (layer.firstElementChild as HTMLElement).scrollTop : 0
     const active = document.activeElement
@@ -41,10 +45,9 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
   }
 
   return {
-    // unlockHints: wired by the ui owner in wave 2.
-    showTitle(daily, progress, aircraft, _unlockHints, cb) {
+    showTitle(daily, progress, aircraft, unlockHints, cb) {
       for (const a of aircraft) names.set(a.id, a.name)
-      mount(renderTitle(daily, progress, aircraft, cb, titleMemory), '.wr-btn--primary', null)
+      mount(renderTitle(daily, progress, aircraft, unlockHints, cb, titleMemory), '.wr-btn--primary', null)
     },
     showResults(model, cb) {
       names.set(model.aircraft.id, model.aircraft.name)

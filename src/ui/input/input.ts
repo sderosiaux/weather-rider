@@ -9,15 +9,22 @@ import {
   stickFromOffset,
   wheelToThrottleDelta,
 } from './mapping'
+import { DISARMED, MENU_EVENT, stepStick, type StickState } from './stick'
 import './input.css'
 
 export interface InputOptions {
   /** Screen-up / W / stick-up = nose down (aviation stick convention). Default false: up = nose up. */
   readonly invertPitch?: boolean
   readonly initialThrottle?: number
-  /** Request pointer lock when the target is clicked. Default true. */
-  readonly pointerLock?: boolean
 }
+
+/**
+ * Published on <html data-wr-stick>, read by the HUD (CSS only) to show the "take the controls" hint:
+ * - disarmed: mouse stick inactive, nothing else used yet
+ * - keys: mouse stick inactive, but the pilot is flying with keyboard/gamepad (hint would be noise)
+ * - armed: pointer locked, the mouse steers
+ */
+export type StickMode = 'disarmed' | 'keys' | 'armed'
 
 const MOUSE_SHAPE = { deadzone: 0.06, expo: 0.45 }
 /** Stick full deflection as a fraction of the smaller viewport side. */
@@ -45,19 +52,14 @@ const HANDLED = new Set([
 
 export const createInput = (target: HTMLElement, options: InputOptions = {}): InputSource => {
   const invertPitch = options.invertPitch ?? false
-  const usePointerLock = options.pointerLock ?? true
   const keys = new Set<string>()
 
   let throttle = clamp(options.initialThrottle ?? 0.7, 0, 1)
   let pendingWheel = 0
   let last = performance.now()
-
-  // Mouse stick: either absolute offset from target center, or a virtual offset accumulated under pointer lock.
-  let mouseActive = false
-  let clientX = 0
-  let clientY = 0
-  let lockedDx = 0
-  let lockedDy = 0
+  let stick: StickState = DISARMED
+  let usedKeysOrPad = false
+  let mode: StickMode | null = null
 
   const smoothed = { kPitch: 0, kRoll: 0, kYaw: 0, mPitch: 0, mRoll: 0, pPitch: 0, pRoll: 0, pYaw: 0 }
 
@@ -68,13 +70,19 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
   const dot = reticle.querySelector<HTMLElement>('.wr-stick__dot')!
 
   const isLocked = (): boolean => document.pointerLockElement === target
-
   const radiusPx = (rect: DOMRect): number => Math.max(40, Math.min(rect.width, rect.height) * MOUSE_RADIUS_FRACTION)
+
+  const publish = (next: StickMode): void => {
+    if (next === mode) return
+    mode = next
+    document.documentElement.dataset.wrStick = next
+  }
 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (isTyping() || !HANDLED.has(e.code)) return
     if (e.metaKey || e.altKey) return
     keys.add(e.code)
+    usedKeysOrPad = true
     e.preventDefault()
   }
   const onKeyUp = (e: KeyboardEvent): void => {
@@ -86,31 +94,30 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
   }
 
   const onMouseMove = (e: MouseEvent): void => {
-    if (isLocked()) {
-      const r = radiusPx(target.getBoundingClientRect())
-      lockedDx = clamp(lockedDx + e.movementX, -r, r)
-      lockedDy = clamp(lockedDy + e.movementY, -r, r)
-      mouseActive = true
-      return
-    }
-    clientX = e.clientX
-    clientY = e.clientY
-    const rect = target.getBoundingClientRect()
-    mouseActive = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+    if (!isLocked()) return
+    stick = stepStick(stick, { type: 'move', mx: e.movementX, my: e.movementY, radius: radiusPx(target.getBoundingClientRect()) })
   }
   const onPointerLockChange = (): void => {
-    if (!isLocked()) mouseActive = false
+    if (isLocked()) {
+      stick = stepStick(stick, { type: 'lock' })
+    } else if (stick.armed) {
+      stick = stepStick(stick, { type: 'unlock' })
+      usedKeysOrPad = false
+    }
   }
   const onClick = (e: MouseEvent): void => {
-    if (!usePointerLock || isLocked()) return
-    // Menus may sit inside the target: clicking a control must not grab the pointer.
+    if (isLocked()) return
+    // Menus may sit over the target: clicking a control must not grab the pointer.
     if (e.target instanceof Element && e.target.closest('button, a, input, textarea, select, label, summary, [role="button"], .wr-screens')) return
-    const rect = target.getBoundingClientRect()
-    // Start locked mode where the cursor was, so the aircraft doesn't jump.
-    lockedDx = clientX - (rect.left + rect.width / 2)
-    lockedDy = clientY - (rect.top + rect.height / 2)
     const req = target.requestPointerLock() as unknown
     if (req instanceof Promise) req.catch(() => undefined)
+  }
+  // A menu came up: whatever the pilot was holding is over. Next flight starts disarmed at neutral.
+  const onMenu = (): void => {
+    stick = DISARMED
+    usedKeysOrPad = false
+    keys.clear()
+    for (const k of Object.keys(smoothed) as (keyof typeof smoothed)[]) smoothed[k] = 0
   }
   const onWheel = (e: WheelEvent): void => {
     const px = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY
@@ -125,6 +132,7 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
   document.addEventListener('pointerlockchange', onPointerLockChange)
   target.addEventListener('click', onClick)
   target.addEventListener('wheel', onWheel, { passive: true })
+  window.addEventListener(MENU_EVENT, onMenu)
 
   const has = (...codes: string[]): boolean => codes.some((c) => keys.has(c))
 
@@ -150,8 +158,7 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     const dt = clamp((now - last) / 1000, 0, 0.1)
     last = now
 
-    const typing = isTyping()
-    if (typing) keys.clear()
+    if (isTyping()) keys.clear()
 
     // Keyboard
     const kPitchRaw = digitalAxis(has('KeyS', 'ArrowDown'), has('KeyW', 'ArrowUp')) * (invertPitch ? -1 : 1)
@@ -162,18 +169,17 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     smoothed.kYaw = smoothToward(smoothed.kYaw, kYawRaw, dt, KEY_TAU)
     const kThrottleRate = digitalAxis(has('ControlLeft', 'ControlRight', 'KeyF'), has('ShiftLeft', 'ShiftRight', 'KeyR')) * KEY_THROTTLE_RATE
 
-    // Mouse
+    // Mouse: armed stick, or the glide back to neutral after release
+    stick = stepStick(stick, { type: 'tick', dt })
     const rect = target.getBoundingClientRect()
     const r = radiusPx(rect)
-    const locked = isLocked()
-    const dx = locked ? lockedDx : clientX - (rect.left + rect.width / 2)
-    const dy = locked ? lockedDy : clientY - (rect.top + rect.height / 2)
-    const stick = mouseActive ? stickFromOffset(dx, dy, r, MOUSE_SHAPE, invertPitch) : { pitch: 0, roll: 0 }
-    smoothed.mPitch = smoothToward(smoothed.mPitch, stick.pitch, dt, MOUSE_TAU)
-    smoothed.mRoll = smoothToward(smoothed.mRoll, stick.roll, dt, MOUSE_TAU)
+    const m = stickFromOffset(stick.dx, stick.dy, r, MOUSE_SHAPE, invertPitch)
+    smoothed.mPitch = smoothToward(smoothed.mPitch, m.pitch, dt, MOUSE_TAU)
+    smoothed.mRoll = smoothToward(smoothed.mRoll, m.roll, dt, MOUSE_TAU)
 
     // Gamepad
     const pad = readPad()
+    if (pad && (pad.pitch !== 0 || pad.roll !== 0 || pad.yaw !== 0 || pad.throttleRate !== 0)) usedKeysOrPad = true
     smoothed.pPitch = smoothToward(smoothed.pPitch, pad?.pitch ?? 0, dt, PAD_TAU)
     smoothed.pRoll = smoothToward(smoothed.pRoll, pad?.roll ?? 0, dt, PAD_TAU)
     smoothed.pYaw = smoothToward(smoothed.pYaw, pad?.yaw ?? 0, dt, PAD_TAU)
@@ -182,17 +188,13 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     throttle = clamp(throttle + pendingWheel, 0, 1)
     pendingWheel = 0
 
-    // Stick reticle: only meaningful while the mouse is steering.
-    const showReticle = mouseActive && !typing
-    reticle.classList.toggle('is-on', showReticle)
-    reticle.classList.toggle('is-locked', locked)
-    if (showReticle) {
+    publish(stick.armed ? 'armed' : usedKeysOrPad ? 'keys' : 'disarmed')
+    reticle.classList.toggle('is-on', stick.armed)
+    if (stick.armed) {
       reticle.style.left = `${rect.left + rect.width / 2}px`
       reticle.style.top = `${rect.top + rect.height / 2}px`
       reticle.style.setProperty('--wr-stick-r', `${r}px`)
-      const cdx = clamp(dx, -r, r)
-      const cdy = clamp(dy, -r, r)
-      dot.style.transform = `translate(${cdx.toFixed(1)}px, ${cdy.toFixed(1)}px)`
+      dot.style.transform = `translate(${stick.dx.toFixed(1)}px, ${stick.dy.toFixed(1)}px)`
     }
 
     return {
@@ -212,7 +214,9 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     document.removeEventListener('pointerlockchange', onPointerLockChange)
     target.removeEventListener('click', onClick)
     target.removeEventListener('wheel', onWheel)
+    window.removeEventListener(MENU_EVENT, onMenu)
     if (isLocked()) document.exitPointerLock()
+    delete document.documentElement.dataset.wrStick
     reticle.remove()
   }
 
