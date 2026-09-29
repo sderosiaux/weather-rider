@@ -1,5 +1,5 @@
 // The seven playable airframes. Numbers are plausible for the class, but fuel is game-scaled:
-// a tank lasts roughly two game routes at cruise, so fuel is a real constraint, not decoration.
+// a tank covers one game route at cruise with ~20 % to spare (balance lab), so fuel is a real constraint, not decoration.
 // Tradeoffs are deliberate: nothing here wins on every axis (see aircraft.test.ts).
 import type { AircraftSpec } from '../core/types'
 
@@ -12,7 +12,7 @@ export const AIRCRAFT: readonly AircraftSpec[] = [
     massKg: 21_500,
     wingAreaM2: 61,
     maxThrustN: 52_000,
-    fuelCapacityKg: 5_000,
+    fuelCapacityKg: 3_100,
     fuelBurnFullKgS: 3.6,
     stallSpeedMs: 52,
     cruiseSpeedMs: 140,
@@ -35,7 +35,7 @@ export const AIRCRAFT: readonly AircraftSpec[] = [
     massKg: 48_000,
     wingAreaM2: 93,
     maxThrustN: 170_000,
-    fuelCapacityKg: 9_000,
+    fuelCapacityKg: 5_800,
     fuelBurnFullKgS: 9.5,
     stallSpeedMs: 64,
     cruiseSpeedMs: 200,
@@ -58,7 +58,7 @@ export const AIRCRAFT: readonly AircraftSpec[] = [
     massKg: 72_000,
     wingAreaM2: 122,
     maxThrustN: 240_000,
-    fuelCapacityKg: 16_000,
+    fuelCapacityKg: 8_800,
     fuelBurnFullKgS: 15,
     stallSpeedMs: 68,
     cruiseSpeedMs: 220,
@@ -82,7 +82,7 @@ export const AIRCRAFT: readonly AircraftSpec[] = [
     massKg: 250_000,
     wingAreaM2: 440,
     maxThrustN: 760_000,
-    fuelCapacityKg: 60_000,
+    fuelCapacityKg: 29_500,
     fuelBurnFullKgS: 52,
     stallSpeedMs: 70,
     cruiseSpeedMs: 245,
@@ -107,7 +107,7 @@ export const AIRCRAFT: readonly AircraftSpec[] = [
     massKg: 380_000,
     wingAreaM2: 540,
     maxThrustN: 1_080_000,
-    fuelCapacityKg: 120_000,
+    fuelCapacityKg: 46_000,
     fuelBurnFullKgS: 72,
     stallSpeedMs: 78,
     cruiseSpeedMs: 232,
@@ -131,7 +131,7 @@ export const AIRCRAFT: readonly AircraftSpec[] = [
     massKg: 115_000,
     wingAreaM2: 380,
     maxThrustN: 600_000,
-    fuelCapacityKg: 28_000,
+    fuelCapacityKg: 15_000,
     fuelBurnFullKgS: 60,
     stallSpeedMs: 72,
     cruiseSpeedMs: 420,
@@ -156,7 +156,7 @@ export const AIRCRAFT: readonly AircraftSpec[] = [
     massKg: 9_000,
     wingAreaM2: 95,
     maxThrustN: 21_000,
-    fuelCapacityKg: 900,
+    fuelCapacityKg: 700,
     fuelBurnFullKgS: 0.8,
     stallSpeedMs: 38,
     cruiseSpeedMs: 115,

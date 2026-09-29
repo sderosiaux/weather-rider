@@ -46,7 +46,7 @@ export function criteriaSummary(rows: readonly FlightRow[]): Criteria {
   const direct = rows.filter((r) => r.pilot === 'direct' && r.outcome === 'arrived')
   const directFuel = median(direct.map((r) => r.fuelRemainingPct))
   const directFuelByAc = AIRCRAFT_ORDER.map((a) => median(direct.filter((r) => r.aircraft === a).map((r) => r.fuelRemainingPct)))
-  const recklessDry = rows.filter((r) => r.pilot === 'reckless' && r.tier === 'extreme' && r.outcome === 'fuel').length
+  const recklessDry = rows.filter((r) => r.pilot === 'reckless' && r.tier === 'extreme' && (r.outcome === 'fuel' || r.fuelRemainingPct < 0.5)).length
   const arrived = rows.filter((r) => r.outcome === 'arrived')
   const over60 = arrived.filter((r) => r.fuelRemainingPct > 60).length / Math.max(arrived.length, 1)
   const surferWu = median(rows.filter((r) => r.pilot === 'surfer' && r.outcome === 'arrived').map((r) => r.weatherUtilization))
