@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Weather Rider · flight lab</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --panel: #ffffff;
+        --border: #e3e6eb;
+        --text: #1d2330;
+        --muted: #6b7384;
+        --accent: #2f6fed;
+        --ground: #c9b89a;
+        --sky: #eef4fb;
+        --lift: #1f9e89;
+        --sink: #e0674f;
+        --jet: #7a5af8;
+        --trace: #2f6fed;
+        --aircraft: #1d2330;
+        --gate: #16a34a;
+        --warn: #d97706;
+        --danger: #dc2626;
+        --grid: #dde3ea;
+        --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+        --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 13px/1.4 var(--font); color: var(--text); background: var(--bg); }
+      .app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
+      aside { background: var(--panel); border-right: 1px solid var(--border); padding: 16px; overflow: auto; }
+      h1 { font-size: 15px; margin: 0 0 12px; font-weight: 600; }
+      label { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin: 12px 0 4px; }
+      select, button { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
+      button { cursor: pointer; transition: background .15s, border-color .15s; }
+      button:hover { border-color: var(--accent); background: var(--sky); }
+      .row { display: flex; gap: 6px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; font-family: var(--mono); font-size: 12px; }
+      td { padding: 2px 0; }
+      td:last-child { text-align: right; }
+      .status { margin-top: 12px; padding: 6px 8px; border-radius: 6px; font-weight: 600; text-align: center; background: var(--sky); }
+      .status.crashed, .status.overstressed { background: color-mix(in srgb, var(--danger) 15%, white); color: var(--danger); }
+      .status.arrived { background: color-mix(in srgb, var(--gate) 15%, white); color: var(--gate); }
+      .status.stall { background: color-mix(in srgb, var(--warn) 15%, white); color: var(--warn); }
+      .keys { margin-top: 12px; color: var(--muted); font-size: 12px; }
+      kbd { font-family: var(--mono); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+      main { display: grid; grid-template-rows: 1fr 1fr 240px; gap: 8px; padding: 8px; min-height: 0; }
+      .view { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; min-height: 0; }
+      .view span { position: absolute; top: 6px; left: 10px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; pointer-events: none; }
+      canvas { width: 100%; height: 100%; display: block; }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside>
+        <h1>Flight lab</h1>
+        <label for="aircraft">Aircraft</label>
+        <select id="aircraft"></select>
+        <label for="scenario">Start</label>
+        <select id="scenario">
+          <option value="route">Route start (x=0, 3000 m)</option>
+          <option value="updraft">Before updraft (x=20 km)</option>
+          <option value="jet">Below the jet (x=40 km, 8500 m)</option>
+          <option value="downdraft">Before downdraft (x=45 km, z=4 km)</option>
+        </select>
+        <label for="speed">Sim speed</label>
+        <select id="speed">
+          <option value="1">1×</option>
+          <option value="4">4×</option>
+          <option value="16">16×</option>
+        </select>
+        <label>&nbsp;</label>
+        <div class="row">
+          <button id="reset">Reset (R)</button>
+          <button id="pause">Pause (P)</button>
+        </div>
+        <div id="status" class="status">flying</div>
+        <table id="readout"></table>
+        <div class="keys">
+          <div><kbd>W</kbd>/<kbd>↑</kbd> nose down · <kbd>S</kbd>/<kbd>↓</kbd> nose up</div>
+          <div><kbd>A</kbd>/<kbd>←</kbd> <kbd>D</kbd>/<kbd>→</kbd> roll</div>
+          <div><kbd>Q</kbd>/<kbd>E</kbd> yaw · <kbd>Shift</kbd>/<kbd>Ctrl</kbd> throttle</div>
+        </div>
+      </aside>
+      <main>
+        <div class="view"><span>Side view — x / altitude · vertical wind at aircraft z</span><canvas id="side"></canvas></div>
+        <div class="view"><span>Top view — x / z · wind at aircraft altitude</span><canvas id="top"></canvas></div>
+        <div class="view"><canvas id="plots"></canvas></div>
+      </main>
+    </div>
+    <script type="module" src="./flight.ts"></script>
+  </body>
+</html>
