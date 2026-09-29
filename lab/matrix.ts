@@ -93,13 +93,20 @@ export interface MatrixResult {
   readonly wallS: number
 }
 
-export function runMatrix(days: readonly number[], pilots: readonly PilotDef[], onProgress?: (msg: string) => void): MatrixResult {
+/** Runs the (day, route tier) units selected by `unit(dayIndex, tierIndex)`; all of them by default. */
+export function runMatrix(
+  days: readonly number[],
+  pilots: readonly PilotDef[],
+  onProgress?: (msg: string) => void,
+  unit: (dayIndex: number, tierIndex: number) => boolean = () => true,
+): MatrixResult {
   const rows: FlightRow[] = []
   const ghosts = new Map<string, { row: FlightRow; ghost: Ghost }>()
   const t0 = performance.now()
-  for (const day of days) {
+  days.forEach((day, di) => {
     const daily = dailyWeatherFor(day)
     daily.routes.forEach((route: Route, i) => {
+      if (!unit(di, i)) return
       const weather = createWeather(weatherParamsFor(daily, route))
       for (const spec of AIRCRAFT) {
         const ref = scoreReference(spec, route)
@@ -168,6 +175,6 @@ export function runMatrix(days: readonly number[], pilots: readonly PilotDef[], 
       }
     })
     onProgress?.(`day ${day} done, ${rows.length} flights, ${((performance.now() - t0) / 1000).toFixed(0)} s`)
-  }
+  })
   return { rows, ghosts, wallS: (performance.now() - t0) / 1000 }
 }
