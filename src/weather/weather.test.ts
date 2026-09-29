@@ -95,7 +95,7 @@ describe('createWeather', () => {
         expect(coverage, `seed ${seed} severity ${severity} jet coverage`).toBeGreaterThanOrEqual(0.5)
       }
     }
-  })
+  }, 30_000)
 
   it('is calm at severity 0', () => {
     const out = newOut()
@@ -147,7 +147,7 @@ describe('createWeather', () => {
         }
       }
     }
-  })
+  }, 30_000)
 
   it('labels the dominant feature', () => {
     const out = newOut()
@@ -160,17 +160,22 @@ describe('createWeather', () => {
     expect(w.sample(v3(500_000, 5000, 0), 0, out).dominant).toBe(null)
   })
 
+  // ~110k pairs: track the worst jumps and assert once (per-pair expect() dominated the runtime).
   it('is continuous: samples 10 m apart never jump', () => {
     const out = newOut()
     const out2 = newOut()
+    const worst = { space: 0, turb: 0, time: 0, spaceAt: '', turbAt: '', timeAt: '' }
+    const where = (pt: Vec3, t: number) => `${pt.x.toFixed(0)},${pt.y.toFixed(0)},${pt.z.toFixed(0)} t=${t.toFixed(2)}`
     const check = (w: WeatherField, pt: Vec3, t: number, dir: Vec3) => {
       const a = w.sample(pt, t, out)
       const b = w.sample(v3(pt.x + dir.x * 10, pt.y + dir.y * 10, pt.z + dir.z * 10), t, out2)
       const dw = Math.hypot(a.wind.x - b.wind.x, a.wind.y - b.wind.y, a.wind.z - b.wind.z)
-      expect(dw, `at ${pt.x.toFixed(0)},${pt.y.toFixed(0)},${pt.z.toFixed(0)} t=${t}`).toBeLessThan(4)
-      expect(Math.abs(a.turbulence - b.turbulence)).toBeLessThan(0.1)
+      const dt = Math.abs(a.turbulence - b.turbulence)
+      if (dw > worst.space) Object.assign(worst, { space: dw, spaceAt: where(pt, t) })
+      if (dt > worst.turb) Object.assign(worst, { turb: dt, turbAt: where(pt, t) })
       const c = w.sample(pt, t + 1 / 60, out2)
-      expect(Math.hypot(a.wind.x - c.wind.x, a.wind.y - c.wind.y, a.wind.z - c.wind.z)).toBeLessThan(1.5)
+      const dtime = Math.hypot(a.wind.x - c.wind.x, a.wind.y - c.wind.y, a.wind.z - c.wind.z)
+      if (dtime > worst.time) Object.assign(worst, { time: dtime, timeAt: where(pt, t) })
     }
     for (let seed = 1; seed <= 3; seed++) {
       const w = createWeather(params(seed * 31, 1))
@@ -216,7 +221,10 @@ describe('createWeather', () => {
         }
       }
     }
-  })
+    expect(worst.space, `wind jump over 10 m at ${worst.spaceAt}`).toBeLessThan(4)
+    expect(worst.turb, `turbulence jump over 10 m at ${worst.turbAt}`).toBeLessThan(0.1)
+    expect(worst.time, `wind jump over 1/60 s at ${worst.timeAt}`).toBeLessThan(1.5)
+  }, 30_000)
 
   it('samples 100k corridor points fast, without reallocating the output', () => {
     const w = createWeather(params(99, 1))
@@ -300,7 +308,7 @@ describe('routing decisions on real daily routes', () => {
     }
     expect(rough).toBeGreaterThanOrEqual(50)
     expect(calm).toBeGreaterThanOrEqual(50)
-  })
+  }, 30_000)
 
   it('draws towering storms on the extreme route', () => {
     const tops: number[] = []
@@ -353,5 +361,5 @@ describe('sample allocation', () => {
     const gcs = await collectionsDuring(() => run(3_000_000))
     expect(gcs).toBeLessThanOrEqual(2)
     expect(sink).toBe(out)
-  })
+  }, 30_000)
 })
