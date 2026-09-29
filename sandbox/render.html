@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Weather Rider · render sandbox</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      .panel {
+        position: fixed; top: 12px; left: 12px; display: flex; gap: 10px; align-items: center;
+        font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; color: rgba(255, 255, 255, 0.85);
+        background: rgba(20, 28, 40, 0.35); padding: 6px 10px; border-radius: 8px; backdrop-filter: blur(6px);
+      }
+      .panel select { font: inherit; background: transparent; color: inherit; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 4px; }
+      .panel select option { color: #000; }
+      body.clean .panel { display: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div class="panel">
+      <span id="fps">– fps</span>
+      <select id="class"></select>
+      <span id="info"></span>
+    </div>
+    <script type="module" src="./render.ts"></script>
+  </body>
+</html>
