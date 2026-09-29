@@ -81,7 +81,7 @@ export const createWorldView: CreateWorldView = (canvas) => {
   sun.position.copy(SUN_DIR)
   const hemi = new THREE.HemisphereLight(new THREE.Color(0.55, 0.65, 0.85), new THREE.Color(0.12, 0.16, 0.22), 1.3)
   for (const light of [sun, hemi]) light.layers.enable(AIRCRAFT_LAYER)
-  scene.add(sky, sea.mesh, cloudPass.composite, aircraft.worldObjects, ghosts.group, gate.group, sun, hemi, aircraft.group)
+  scene.add(sky, sea.mesh, cloudPass.composite, clouds.depthMesh, aircraft.worldObjects, ghosts.group, gate.group, sun, hemi, aircraft.group)
   const drawingSize = new THREE.Vector2()
 
   let weather: WeatherField | null = null
