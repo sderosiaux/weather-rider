@@ -7,6 +7,16 @@ import { ENGINE_VOICES, type EngineVoice } from './voices'
 
 export type AudioScene = 'menu' | 'flight'
 
+/** Parts of the graph that can be disconnected when their scene doesn't use them (wind and cues are always on). */
+export const LAYERS = ['engine', 'rumble', 'shimmer', 'sink', 'jetPad', 'stall', 'menuPad'] as const
+export type Layer = (typeof LAYERS)[number]
+
+const MENU_LAYERS: ReadonlySet<Layer> = new Set(['menuPad'])
+const FLIGHT_LAYERS: ReadonlySet<Layer> = new Set(LAYERS.filter((l) => l !== 'menuPad'))
+
+/** Layers a scene can make audible. Everything else has a zero target level there and may be disconnected. */
+export const layersFor = (scene: AudioScene): ReadonlySet<Layer> => (scene === 'menu' ? MENU_LAYERS : FLIGHT_LAYERS)
+
 export interface MixTargets {
   readonly windLevel: number
   readonly windCutoffHz: number
@@ -128,3 +138,6 @@ export const SMOOTHING = {
   pad: 1.6,
   scene: 1.2,
 } as const
+
+/** After a scene change, wait this long before disconnecting the old scene's layers: 8 time constants of the slowest fade (≈ −70 dB), so the cut is inaudible. */
+export const LAYER_CLOSE_AFTER_S = 8 * Math.max(...Object.values(SMOOTHING))

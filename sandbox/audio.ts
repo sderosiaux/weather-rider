@@ -3,9 +3,10 @@
 // (nobody can "listen" in CI): RMS and three band energies, in dBFS, averaged over a window.
 import type { AudioFrame } from '../src/core/presentation'
 import type { AircraftClass, WeatherFeatureKind } from '../src/core/types'
-import { createAudioWith } from '../src/audio'
+import { createAudioWith, type AudioGraph } from '../src/audio'
 import type { CueKind } from '../src/audio/cues'
-import type { AudioScene } from '../src/audio/mix'
+import { buildGraph } from '../src/audio/graph'
+import { computeMix, LAYERS, layersFor, type AudioScene, type Layer } from '../src/audio/mix'
 
 type NumKey = 'airspeedMs' | 'throttle' | 'turbulence' | 'verticalWindMs' | 'cloud'
 const SLIDERS: readonly { key: NumKey; min: number; max: number; step: number }[] = [
@@ -45,10 +46,25 @@ let frame: AudioFrame = BASE
 let scene: AudioScene = 'menu'
 let analyser: AnalyserNode | null = null
 let ctxRef: AudioContext | null = null
+let graphRef: AudioGraph | null = null
+/** Chrome's AudioContext.renderCapacity (experimental); absent elsewhere. */
+interface RenderCapacity extends EventTarget {
+  start(options?: { updateInterval?: number }): void
+}
+let renderLoad: { average: number; peak: number } | null = null
 
 const audio = createAudioWith({
-  onGraph(ctx, output) {
+  onGraph(ctx, output, graph) {
     ctxRef = ctx
+    graphRef = graph
+    const rc = (ctx as AudioContext & { renderCapacity?: RenderCapacity }).renderCapacity
+    if (rc) {
+      rc.addEventListener('update', (e) => {
+        const ev = e as Event & { averageLoad: number; peakLoad: number }
+        renderLoad = { average: ev.averageLoad, peak: ev.peakLoad }
+      })
+      rc.start({ updateInterval: 1 })
+    }
     analyser = ctx.createAnalyser()
     analyser.fftSize = 4096
     analyser.smoothingTimeConstant = 0
@@ -99,6 +115,13 @@ const presetButtons = Object.keys(PRESETS).map((name) => {
 $('start').addEventListener('click', () => {
   audio.resume()
   $('start').textContent = 'Audio running'
+})
+// Worst case for cues: fired in the very gesture that creates the context (still 'suspended' then).
+$('start-cue').addEventListener('click', () => {
+  audio.resume()
+  const state = ctxRef?.state
+  audio.cue('arrived')
+  $('start').textContent = `Audio running (ctx was ${state} at cue time)`
 })
 $('measure').addEventListener('click', () => void measureAll())
 
@@ -196,6 +219,41 @@ async function measureAll(settleMs = 6000): Promise<Record<string, Levels>> {
   return out
 }
 
+// ─── CPU benchmark ──────────────────────────────────────────────────────────
+// Renders the same graph offline (as fast as the CPU allows) with and without layer gating.
+// Wall-clock render time ∝ audio-thread cost; "ungated" = every layer connected (pre-gating behaviour).
+export interface BenchRow {
+  readonly config: string
+  readonly renderMs: number
+  readonly realtimeX: number
+  readonly sourcesRendered: number
+  readonly sourcesTotal: number
+}
+async function benchmark(seconds = 10): Promise<BenchRow[]> {
+  const sr = 48_000
+  const rows: BenchRow[] = []
+  const configs: readonly { config: string; scene: AudioScene; open: ReadonlySet<Layer> }[] = [
+    { config: 'menu, ungated (before)', scene: 'menu', open: new Set(LAYERS) },
+    { config: 'menu, gated', scene: 'menu', open: layersFor('menu') },
+    { config: 'flight, ungated (before)', scene: 'flight', open: new Set(LAYERS) },
+    { config: 'flight, gated', scene: 'flight', open: layersFor('flight') },
+  ]
+  for (const c of configs) {
+    const off = new OfflineAudioContext(2, sr * seconds, sr)
+    const g = buildGraph(off)
+    g.setVolume(0.8)
+    g.apply(computeMix({ ...BASE, verticalWindMs: 8, turbulence: 0.5 }, c.scene), false)
+    g.openLayers(c.open)
+    g.closeLayersExcept(c.open)
+    const t0 = performance.now()
+    await off.startRendering()
+    const renderMs = performance.now() - t0
+    const src = g.sourceCount()
+    rows.push({ config: c.config, renderMs, realtimeX: (seconds * 1000) / renderMs, sourcesRendered: src.rendered, sourcesTotal: src.total })
+  }
+  return rows
+}
+
 // ─── loop ───────────────────────────────────────────────────────────────────
 let last = performance.now()
 const meter = (id: string, dbValue: number) => {
@@ -210,7 +268,11 @@ function tick(now: number): void {
   if (p) {
     const l = { rms: db(p.rms), low: db(p.low), mid: db(p.mid), high: db(p.high) }
     meter('m-rms', l.rms); meter('m-low', l.low); meter('m-mid', l.mid); meter('m-high', l.high)
-    $('readout').textContent = `RMS ${l.rms.toFixed(1)} dBFS   low ${l.low.toFixed(1)}   mid ${l.mid.toFixed(1)}   high ${l.high.toFixed(1)}   ctx ${ctxRef?.state}`
+    const src = graphRef?.sourceCount()
+    const load = renderLoad ? `   load ${(renderLoad.average * 100).toFixed(1)}% (peak ${(renderLoad.peak * 100).toFixed(1)}%)` : ''
+    $('readout').textContent =
+      `RMS ${l.rms.toFixed(1)} dBFS   low ${l.low.toFixed(1)}   mid ${l.mid.toFixed(1)}   high ${l.high.toFixed(1)}   ctx ${ctxRef?.state}\n` +
+      `sources rendered ${src?.rendered ?? '—'} / ${src?.total ?? '—'}${load}`
   }
   requestAnimationFrame(tick)
 }
@@ -228,6 +290,9 @@ declare global {
       measure(windowMs?: number): Promise<Levels>
       measurePreset(name: string, settleMs?: number): Promise<Levels>
       measureAll(settleMs?: number): Promise<Record<string, Levels>>
+      benchmark(seconds?: number): Promise<BenchRow[]>
+      sources(): { readonly total: number; readonly rendered: number } | null
+      renderLoad(): { average: number; peak: number } | null
     }
   }
 }
@@ -240,4 +305,7 @@ window.__audio = {
   measure,
   measurePreset,
   measureAll,
+  benchmark,
+  sources: () => graphRef?.sourceCount() ?? null,
+  renderLoad: () => renderLoad,
 }
