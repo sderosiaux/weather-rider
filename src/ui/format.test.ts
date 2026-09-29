@@ -3,7 +3,6 @@ import {
   flightTime,
   ghostDelta,
   groupThousands,
-  humanizeId,
   recordState,
   severityBucket,
   shareUrl,
@@ -58,8 +57,7 @@ describe('format', () => {
     expect(shareUrl('https://x.io', '/play/', 'abc')).toBe('https://x.io/play/#g=abc')
   })
 
-  it('humanizes ids and wraps angles', () => {
-    expect(humanizeId('narrowbody-a320')).toBe('Narrowbody A320')
+  it('wraps angles', () => {
     expect(wrapDeg(190)).toBe(-170)
     expect(wrapDeg(-180)).toBe(180)
     expect(wrapDeg(45)).toBe(45)

@@ -11,6 +11,12 @@
   -webkit-font-smoothing: antialiased;
   font-variant-numeric: tabular-nums lining-nums;
 }
+.wr-screens[data-screen='title'] {
+  /* The live demo flight behind the title is the pitch: no wash, no blur. */
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
 .wr-screens.is-hidden {
   display: none;
 }
@@ -175,7 +181,21 @@
   align-items: safe center;
 }
 .wr-title__hero {
+  position: relative;
+  isolation: isolate;
   max-width: 560px;
+  text-shadow: var(--wr-title-text-halo);
+}
+.wr-title__hero::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -12% -22% -10% -30%;
+  background: var(--wr-title-halo);
+  pointer-events: none;
+}
+.wr-title__hero kbd {
+  text-shadow: none;
 }
 .wr-title__daily {
   font-size: var(--wr-text-xs);
@@ -545,13 +565,28 @@
   flex-wrap: wrap;
   gap: var(--wr-space-2);
 }
-.wr-unlocked__list li {
+.wr-unlocked__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--wr-space-2);
   font-size: var(--wr-text-sm);
   font-weight: var(--wr-weight-strong);
   padding: 6px 14px;
   border-radius: var(--wr-radius-pill);
   color: var(--wr-record);
   background: var(--wr-record-soft);
+}
+.wr-unlocked__kind {
+  font-size: var(--wr-text-2xs);
+  font-weight: var(--wr-weight-medium);
+  opacity: 0.8;
+}
+/* A new aircraft is the bigger moment: it joins the hangar gallery. */
+.wr-unlocked__item--aircraft {
+  color: var(--wr-action-ink);
+  background: var(--wr-record);
+  font-size: var(--wr-text-md);
+  padding: 8px 18px;
 }
 
 .wr-share {

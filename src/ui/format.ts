@@ -57,14 +57,6 @@ export type RecordState = 'first' | 'record' | 'tie' | 'below'
 export const recordState = (value: number, previous: number | null): RecordState =>
   previous === null ? 'first' : value > previous ? 'record' : value === previous ? 'tie' : 'below'
 
-/** "narrowbody-a320" → "Narrowbody A320". Fallback when only an id is known. */
-export const humanizeId = (id: string): string =>
-  id
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((w) => (/\d/.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
-    .join(' ')
-
 /** Share link: the ghost rides in the hash so it never reaches a server. */
 export const shareUrl = (origin: string, pathname: string, ghostCode: string): string =>
   `${origin}${pathname}#g=${ghostCode}`
