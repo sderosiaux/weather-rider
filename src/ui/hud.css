@@ -483,6 +483,30 @@
   to { opacity: 1; }
 }
 
+.wr-hud__coach {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--wr-edge) + 88px);
+  transform: translate(-50%, -4px);
+  max-width: min(560px, 80vw);
+  text-align: center;
+  font-size: var(--wr-text-md);
+  font-weight: var(--wr-weight-medium);
+  line-height: 1.35;
+  padding: var(--wr-space-2) var(--wr-space-4);
+  border-radius: var(--wr-radius-lg);
+  background: var(--wr-glass-heavy);
+  -webkit-backdrop-filter: var(--wr-glass-blur);
+  backdrop-filter: var(--wr-glass-blur);
+  box-shadow: var(--wr-glass-shadow);
+  opacity: 0;
+  transition: opacity var(--wr-slow) var(--wr-ease), transform var(--wr-slow) var(--wr-ease);
+}
+.wr-hud__coach.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 .wr-hud__take {
   position: absolute;
   left: 50%;
@@ -550,5 +574,5 @@
 @media (prefers-reduced-motion: reduce) {
   .wr-hud__stall.is-on { animation: none; opacity: 1; }
   .wr-hud__speed.is-jet .wr-hud__gs-val { animation: none; }
-  .wr-hud__whisper { transition: opacity var(--wr-med) linear; }
+  .wr-hud__whisper, .wr-hud__coach { transition: opacity var(--wr-med) linear; }
 }

@@ -2,6 +2,8 @@ import type { CreateHud, Hud } from '../core/presentation'
 import type { HudModel, WeatherFeatureKind } from '../core/types'
 import { createWriter, h, svg } from './dom'
 import { featureLabel, flightTime, ghostDelta, groupThousands, turbulenceLevel, wrapDeg } from './format'
+import { initialCoach, newFlight, stepCoach, type CoachState } from './coach/coach'
+import { loadMemory, saveMemory } from './coach/store'
 import './hud.css'
 
 /** Share of a full circle drawn by the cabin arcs (270° sweep). */
@@ -111,13 +113,36 @@ export const createHud: CreateHud = (root: HTMLElement): Hud => {
   // ── Center: stall + weather whisper
   const stall = h('div', 'wr-hud__stall', 'STALL', h('small', {}, 'lower the nose, add power'))
   const whisper = h('div', 'wr-hud__whisper')
+  const coachLine = h('div', { class: 'wr-hud__coach', role: 'status', 'aria-live': 'polite' })
   // Shown by CSS from <html data-wr-stick="disarmed"> (published by the input module).
   const takeControls = h('div', 'wr-hud__take', h('b', {}, 'Click to take the controls'), h('span', {}, 'or fly with W A S D'))
 
-  const el = h('div', { class: 'wr-hud', 'aria-hidden': 'true' }, top, air, speed, altitude, stall, whisper, takeControls, engine, gate, cabin)
+  const el = h('div', { class: 'wr-hud', 'aria-hidden': 'true' }, top, air, speed, altitude, coachLine, stall, whisper, takeControls, engine, gate, cabin)
   root.appendChild(el)
 
   let lastDominant: WeatherFeatureKind | null | undefined
+
+  // Coaching reads the same model stream; memory is reloaded per flight so the title toggle applies.
+  const fromMemory = (): CoachState => {
+    const mem = loadMemory()
+    return initialCoach(mem.enabled, mem.retired, mem.jetRideS)
+  }
+  let coach = fromMemory()
+  const persistCoach = (): void => saveMemory({ ...loadMemory(), retired: coach.retired, jetRideS: coach.jetRideS })
+  const runCoach = (m: HudModel): void => {
+    const r = stepCoach(coach, m, performance.now() / 1000)
+    coach = r.state
+    for (const e of r.events) {
+      if (e.type === 'show') {
+        w.text(coachLine, e.text)
+        w.flag(coachLine, 'is-on', true)
+      } else if (e.type === 'hide') {
+        w.flag(coachLine, 'is-on', false)
+      } else {
+        persistCoach()
+      }
+    }
+  }
 
   const update = (m: HudModel): void => {
     w.text(daily, `WORLD WEATHER #${m.dailyNumber} · ${m.routeLabel}`)
@@ -191,6 +216,7 @@ export const createHud: CreateHud = (root: HTMLElement): Hud => {
     w.flag(air, 'is-severe', lvl === 'severe')
 
     w.flag(stall, 'is-on', m.stalled)
+    runCoach(m)
 
     // Whisper the dominant feature; hold the last word while it fades out.
     if (m.dominant !== lastDominant) {
@@ -204,6 +230,12 @@ export const createHud: CreateHud = (root: HTMLElement): Hud => {
   return {
     update,
     setVisible(visible: boolean): void {
+      if (visible && el.classList.contains('is-hidden')) {
+        const mem = loadMemory()
+        coach = newFlight({ ...coach, enabled: mem.enabled, retired: mem.retired, jetRideS: mem.jetRideS })
+      }
+      if (!visible && !el.classList.contains('is-hidden')) persistCoach()
+      if (!visible) w.flag(coachLine, 'is-on', false)
       w.flag(el, 'is-hidden', !visible)
     },
     dispose(): void {
