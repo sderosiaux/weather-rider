@@ -293,7 +293,8 @@ export interface LeaderboardEntry {
 
 // ─── Presentation contracts ─────────────────────────────────────────────────
 
-/** Everything the HUD shows. Built by the game loop, rendered by ui/. */
+/** Everything the HUD shows. Built by the game loop, rendered by ui/.
+ *  Units: comfort/stress/fuelPct 0..100 (stress 100 = failure), turbulence/throttle 0..1, gLoad in g. */
 export interface HudModel {
   readonly dailyNumber: number
   readonly routeLabel: string
