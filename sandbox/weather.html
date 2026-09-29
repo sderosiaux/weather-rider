@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Weather sandbox · Weather Rider</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --panel: #ffffff;
+        --border: #e3e6eb;
+        --text: #1b2330;
+        --muted: #6b7482;
+        --accent: #2563eb;
+        --accent-soft: #e8efff;
+        --radius: 10px;
+        --font: ui-sans-serif, -apple-system, 'Inter', 'Segoe UI', sans-serif;
+        --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 13px/1.4 var(--font); color: var(--text); background: var(--bg); }
+      .app { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+      aside { background: var(--panel); border-right: 1px solid var(--border); padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+      h1 { font-size: 15px; margin: 0; letter-spacing: 0.01em; }
+      h1 small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; margin-top: 2px; }
+      label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+      label span.val { color: var(--text); font-family: var(--mono); }
+      .row { display: flex; justify-content: space-between; align-items: baseline; }
+      input[type='number'], select { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
+      input[type='range'] { width: 100%; accent-color: var(--accent); }
+      .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .checks label { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+      button { font: inherit; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+      button:hover { background: var(--accent-soft); border-color: var(--accent); }
+      button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .buttons { display: flex; gap: 6px; }
+      .stats, .readout { font-family: var(--mono); font-size: 11.5px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; white-space: pre; }
+      main { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+      .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+      .card header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+      .card header b { font-size: 13px; }
+      .card header span { color: var(--muted); font-size: 12px; }
+      .stack { position: relative; }
+      .stack canvas { display: block; }
+      .stack canvas + canvas { position: absolute; inset: 0; }
+      .legend { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11.5px; margin-top: 6px; }
+      .legend canvas { border-radius: 3px; border: 1px solid var(--border); }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside>
+        <h1>Weather sandbox<small>createWeather debug viewer</small></h1>
+        <label>Seed <input id="seed" type="number" value="184" /></label>
+        <label><div class="row">Severity <span class="val" id="sevVal"></span></div><input id="severity" type="range" min="0" max="1" step="0.05" value="0.6" /></label>
+        <label><div class="row">Gate lateral offset <span class="val" id="gateVal"></span></div><input id="gate" type="range" min="-20000" max="20000" step="1000" value="0" /></label>
+        <label><div class="row">Altitude (plan view) <span class="val" id="altVal"></span></div><input id="alt" type="range" min="0" max="14000" step="250" value="5000" /></label>
+        <label><div class="row">Time <span class="val" id="timeVal"></span></div><input id="time" type="range" min="0" max="900" step="1" value="0" /></label>
+        <div class="buttons"><button id="play">Play</button><button id="reroll">New seed</button></div>
+        <label>Heatmap
+          <select id="layer">
+            <option value="vertical">Vertical wind (m/s)</option>
+            <option value="turbulence">Turbulence</option>
+            <option value="speed">Horizontal speed (m/s)</option>
+            <option value="tailwind">Tailwind +x (m/s)</option>
+            <option value="cloud">Cloud density</option>
+          </select>
+        </label>
+        <div class="checks">
+          <label><input id="arrows" type="checkbox" checked /> Arrows</label>
+          <label><input id="particles" type="checkbox" checked /> Particles</label>
+          <label><input id="clouds" type="checkbox" checked /> Clouds</label>
+          <label><input id="labels" type="checkbox" checked /> Features</label>
+        </div>
+        <div class="stats" id="stats"></div>
+        <div class="readout" id="readout">hover a view</div>
+      </aside>
+      <main>
+        <section class="card">
+          <header><b>Plan view</b><span id="planTitle"></span></header>
+          <div class="stack" id="planStack"><canvas id="plan"></canvas><canvas id="planFx"></canvas></div>
+          <div class="legend"><span id="legendMin"></span><canvas id="legend" width="240" height="10"></canvas><span id="legendMax"></span><span id="legendName"></span></div>
+        </section>
+        <section class="card">
+          <header><b>Vertical section along the corridor</b><span>x → gate, 0–14 km</span></header>
+          <div class="stack" id="sectionStack"><canvas id="section"></canvas><canvas id="sectionFx"></canvas></div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="./weather.ts"></script>
+  </body>
+</html>
