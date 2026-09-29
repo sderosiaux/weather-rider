@@ -122,9 +122,9 @@ const LOW_JET_OFFSET = 9000
 const LOW_JET_OFFSET_SPAN = 4000
 const LOW_JET_MEANDER = 2500
 const LOW_JET_HALF_WIDTH = 4500
-const LOW_JET_BOOST = 2
+const LOW_JET_BOOST = 2.2
 /** Background westerly (m/s) at the surface and aloft: negative = easterly headwind for eastbound routes down low. */
-const BG_SURFACE = -10
+const BG_SURFACE = -4
 const BG_ALOFT = 33
 const BG_K1 = TAU / 140_000
 const BG_K2 = TAU / 90_000
@@ -135,7 +135,7 @@ export function backgroundAngle(bg: BackgroundSpec, x: number, z: number, t: num
   return 0.3 * Math.sin(x * BG_K1 + bg.p1 + t * 0.0006) * Math.cos(z * BG_K2 + bg.p2) + 0.12 * Math.sin((x - z) * BG_K3 + bg.p3)
 }
 
-/** Westerly speed profile: ≈5 m/s at the surface, ≈30 m/s at 10 km. */
+/** Westerly speed profile: a light easterly (BG_SURFACE) near the ground, ≈29 m/s at 10 km. */
 export function backgroundSpeed(y: number): number {
   const s = y / 7000
   return BG_SURFACE + (BG_ALOFT - BG_SURFACE) * (1 - Math.exp(-s * s))

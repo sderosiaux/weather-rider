@@ -1,4 +1,5 @@
 import { GRAVITY, SEVERE_TURBULENCE } from '../core/constants'
+import { trimLevel } from '../flight'
 import type { AircraftSpec, AircraftState, CreateScoreTracker, FlightScore, Route, TelemetryFrame } from '../core/types'
 
 // ─── Comfort ────────────────────────────────────────────────────────────────
@@ -18,11 +19,10 @@ const PERCEPTION_TAU = 0.1 // s
 //   utilization = 100 · E_atm / (E_atm + E_eng)
 // m·g·wind.y is the potential energy an air mass lifts into the airframe per second.
 // D_ref·(wind · track) is the engine power a tailwind saves: to gain that ground speed
-// in still air you'd push drag D_ref ≈ m·g / L_D_REF for (wind · track) m/s more.
-// L_D_REF is the game airframes' typical cruise lift/drag (drag/weight 0.11–0.2 at cruise).
+// in still air you'd push this airframe's cruise drag D_ref (trimmed at 3 km) for (wind · track) m/s more.
 // track = horizontal unit vector toward the gate. Both terms are signed so gust noise
 // averages out and flying through downdrafts / headwinds is paid back.
-const L_D_REF = 7
+const DRAG_REF_ALT_M = 3000
 /** Thrust ∝ (ρ/ρ0)^THRUST_LAPSE, the same law as flight/aero.ts. */
 const THRUST_LAPSE = 0.9
 const SCALE_HEIGHT_M = 8500
@@ -79,7 +79,7 @@ const isTerminal = (s: AircraftState['status']): boolean => s !== 'flying'
 
 export const createScoreTracker: CreateScoreTracker = (spec, route) => {
   const ref = scoreReference(spec, route)
-  const dragRef = (spec.massKg * GRAVITY) / L_D_REF
+  const dragRef = Math.max(0, trimLevel(spec, DRAG_REF_ALT_M, spec.cruiseSpeedMs).throttle) * spec.maxThrustN * lapse(DRAG_REF_ALT_M)
   const speedLev = Math.pow(spec.cruiseSpeedMs / V_REF, SPEED_LEVERAGE)
   const ecoLev = Math.pow(spec.cruiseSpeedMs / V_REF, ECO_LEVERAGE)
   const ride = Math.pow((spec.gustSensitivity * spec.cabinDamping) / RIDE_REF, RIDE_NORM)
