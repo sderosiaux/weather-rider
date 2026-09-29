@@ -16,6 +16,7 @@ import {
   unlockHints,
   weatherParamsFor,
 } from '../meta'
+import { createAudio } from '../audio'
 import { createWorldView } from '../render'
 import { ghostCodec } from '../scoring'
 import { createHud, createInput, createScreens } from '../ui'
@@ -45,7 +46,12 @@ export function startApp(root: HTMLElement): void {
   const hud = createHud(overlay)
   const screens = createScreens(overlay)
   const input = createInput(canvas)
+  const audio = createAudio()
   hud.setVisible(false)
+  // Browsers only allow audio after a user gesture; resume() is idempotent.
+  const unlockAudio = (): void => audio.resume()
+  window.addEventListener('pointerdown', unlockAudio)
+  window.addEventListener('keydown', unlockAudio)
 
   const persist = (p: PlayerProgress): void => {
     progress = p
@@ -69,6 +75,7 @@ export function startApp(root: HTMLElement): void {
 
   const showTitle = (): void => {
     hud.setVisible(false)
+    audio.setScene('menu')
     const route = today.routes[0]
     const spec = specFor(progress.unlockedAircraft[0] ?? AIRCRAFT[0]!.id)
     const weather = createWeather(weatherParamsFor(today, route))
@@ -120,6 +127,7 @@ export function startApp(root: HTMLElement): void {
 
     screens.hide()
     hud.setVisible(true)
+    audio.setScene('flight')
     mode = { kind: 'flying', session: createFlightSession({ daily, route, spec, weather, pilot: progress.pilot, ghosts }) }
   }
 
@@ -136,6 +144,11 @@ export function startApp(root: HTMLElement): void {
     persist(recorded.progress)
     store.submit(recorded.entries)
     hud.setVisible(false)
+    audio.setScene('menu')
+    if (outcome.score.status !== 'flying') audio.cue(outcome.score.status)
+    const beat = previousBest && (['smooth', 'speed', 'eco'] as const).some((b) => outcome.score[b] > previousBest[b])
+    if (recorded.newlyUnlocked.length > 0) audio.cue('unlock')
+    else if (beat) audio.cue('record')
     mode = { kind: 'results', backdrop: session.state() }
     screens.showResults(
       { score: outcome.score, route, dailyNumber: daily.number, aircraft: spec, ghostCode: outcome.ghostCode, previousBest, newlyUnlocked: recorded.newlyUnlocked },
@@ -160,6 +173,21 @@ export function startApp(root: HTMLElement): void {
       const session = mode.session
       const outcome = session.advance(dtReal, input.read())
       hud.update(session.hud())
+      const air = session.air()
+      const s = session.state()
+      audio.update(
+        {
+          airspeedMs: s.airspeed,
+          throttle: s.throttle,
+          turbulence: air.turbulence,
+          dominant: air.dominant,
+          verticalWindMs: air.wind.y,
+          cloud: air.cloud,
+          stalled: s.stalled,
+          aircraftClass: session.setup.spec.class,
+        },
+        dtReal,
+      )
       world.update({ state: session.state(), ghostPoses: session.ghostPoses(), dtReal })
       flow.update(world.camera, session.state().t, dtReal)
       if (outcome) finish(session, outcome)
