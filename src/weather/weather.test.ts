@@ -315,27 +315,43 @@ describe('routing decisions on real daily routes', () => {
   })
 })
 
-// Needs `vitest run --pool=forks --execArgv=--expose-gc`; skipped otherwise.
-const gc = (globalThis as { gc?: () => void }).gc
-const heapUsed = () => (globalThis as unknown as { process: { memoryUsage(): { heapUsed: number } } }).process.memoryUsage().heapUsed
-describe.skipIf(!gc)('sample allocation', () => {
-  it('does not allocate per call when `out` is provided', () => {
+let sink: unknown = null
+
+/** Garbage collections triggered while `fn` runs synchronously (nothing else can allocate meanwhile). */
+async function collectionsDuring(fn: () => void): Promise<number> {
+  let n = 0
+  const obs = new PerformanceObserver((list) => (n += list.getEntries().length))
+  obs.observe({ entryTypes: ['gc'] })
+  // Flush entries from earlier tests, then measure.
+  await new Promise((r) => setTimeout(r, 20))
+  n = 0
+  fn()
+  await new Promise((r) => setTimeout(r, 50))
+  obs.disconnect()
+  return n
+}
+
+describe('sample allocation', () => {
+  // Counts GCs rather than heap deltas: scavenges during the loop hide garbage from heapUsed.
+  it('does not allocate per call when `out` is provided', async () => {
     const w = createWeather(params(3, 1))
     const out = newOut()
     const p = { x: 0, y: 0, z: 0 }
     const run = (n: number) => {
       for (let i = 0; i < n; i++) {
         p.x = (i * 7919) % 100_000
-        p.y = (i * 131) % 13_000
+        p.y = (i * 131) % 14_000
         p.z = ((i * 613) % 40_000) - 20_000
-        w.sample(p, i * 0.01, out)
+        // Integer t: a double computed per iteration would be boxed by this caller at the call
+        // boundary (the render passes one loop-invariant t per frame, which is not re-boxed).
+        // The sink keeps the JIT from scalar-replacing a freshly allocated result.
+        sink = w.sample(p, i % 900, out)
       }
     }
-    run(300_000)
-    gc!()
-    const before = heapUsed()
-    run(1_000_000)
-    // One small object per call would be ≥ 32 MB here.
-    expect(heapUsed() - before).toBeLessThan(4_000_000)
+    run(400_000)
+    // 3M calls: a single 16-byte object per call (48 MB) would force dozens of scavenges.
+    const gcs = await collectionsDuring(() => run(3_000_000))
+    expect(gcs).toBeLessThanOrEqual(2)
+    expect(sink).toBe(out)
   })
 })
