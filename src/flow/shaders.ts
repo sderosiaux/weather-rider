@@ -42,11 +42,11 @@ varying float vSoft;
 
 // rgb = sRGB color, a = base alpha
 const vec4 KIND_COLOR[8] = vec4[8](
-  vec4(0.97, 0.98, 1.00, 0.30),
+  vec4(0.97, 0.98, 1.00, 0.42),
   vec4(1.00, 0.42, 0.06, 0.52),
   vec4(0.16, 0.26, 0.95, 0.62),
   vec4(1.00, 0.60, 0.30, 0.50),
-  vec4(0.10, 0.90, 0.78, 0.32),
+  vec4(0.10, 0.90, 0.78, 0.22),
   vec4(0.05, 0.70, 0.80, 0.30),
   vec4(0.62, 0.45, 1.00, 0.60),
   vec4(0.78, 0.10, 0.55, 0.70)
@@ -130,6 +130,13 @@ void main() {
   // and thousands of overlapping ribbons turn into a wall. Dim a kind in proportion to how much of the
   // volume it owns, so it reads as a river rather than a fog. Rare kinds (a distant updraft) stay full strength.
   alpha *= mix(1.0, kind == 0 ? 0.75 : 0.4, smoothstep(0.25, 0.9, uKindShare[kind]));
+  // View alignment: trails running along the view ray collapse onto the vanishing point and read as a
+  // hyperspace warp (the mean wind is ≈ the flight axis). Fade them; cross-view filaments carry the image.
+  // Strongest for calm air and jets, whose trails are the long radial ones; columns seen side-on are untouched.
+  vec3 segDir = speed > 1e-3 ? vel / speed : vec3(0.0);
+  float align = abs(dot(segDir, normalize(p - cameraPosition)));
+  float alignFloor = kind == 0 ? 0.12 : kind == 4 ? 0.15 : 0.5;
+  alpha *= mix(1.0, alignFloor, smoothstep(0.55, 0.95, align));
   alpha *= uIntensity;
 
   vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
