@@ -23,7 +23,7 @@ export const PALETTE = {
   belowHorizon: new THREE.Color(0.3, 0.36, 0.5),
   sun: new THREE.Color(2.0, 1.25, 0.66),
   /** Blue-violet light filling cloud shadows. */
-  cloudShadow: new THREE.Color(0.17, 0.2, 0.34),
+  cloudShadow: new THREE.Color(0.12, 0.14, 0.26),
   /** Ambient on sunlit cloud tops (sky dome contribution). */
   cloudAmbient: new THREE.Color(0.5, 0.58, 0.8),
   seaDeep: new THREE.Color(0.012, 0.045, 0.1),
@@ -59,7 +59,7 @@ export function createAtmosphereUniforms(): AtmosphereUniforms {
     uBelowHorizon: { value: PALETTE.belowHorizon.clone() },
     uInCloudColor: { value: PALETTE.inCloud.clone() },
     uCamPos: { value: new THREE.Vector3() },
-    uFog: { value: new THREE.Vector3(1.6e-4, 1300, 1.3e-5) },
+    uFog: { value: new THREE.Vector3(1.6e-4, 1300, 0.75e-5) },
     uInCloud: { value: 0 },
     uTime: { value: 0 },
   }
