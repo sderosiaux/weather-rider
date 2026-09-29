@@ -24,10 +24,11 @@ export interface Quat {
 export type WeatherFeature =
   /** Cumulonimbus: violent core, strong updraft on its flanks, downdraft under the anvil. */
   | { readonly kind: 'storm'; readonly id: string; readonly center: Vec3; readonly radius: number; readonly base: number; readonly top: number; readonly strength: number }
-  /** Vertical column. strength = peak vertical wind (m/s), negative for downdraft. */
+  /** Vertical column. strength = peak vertical wind (m/s), negative for downdraft. center.y = (base + top) / 2 for all column kinds. */
   | { readonly kind: 'updraft' | 'downdraft' | 'thermal'; readonly id: string; readonly center: Vec3; readonly radius: number; readonly base: number; readonly top: number; readonly strength: number }
   /** Tube of fast horizontal wind along a polyline. speed in m/s. */
-  | { readonly kind: 'jetstream'; readonly id: string; readonly path: readonly Vec3[]; readonly radius: number; readonly speed: number }
+  /** radius = horizontal half-width, thickness = vertical half-thickness (jets are flat ribbons). */
+  | { readonly kind: 'jetstream'; readonly id: string; readonly path: readonly Vec3[]; readonly radius: number; readonly thickness: number; readonly speed: number }
   /** Horizontal layer where wind changes abruptly by deltaWind across thickness. */
   | { readonly kind: 'shear'; readonly id: string; readonly altitude: number; readonly thickness: number; readonly deltaWind: Vec3; readonly extentMin: Vec3; readonly extentMax: Vec3 }
   /** Wake left by background traffic: two counter-rotating vortices behind path points. */

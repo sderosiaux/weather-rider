@@ -12,6 +12,8 @@ import {
   parseShareHash,
   recordFlight,
   setLivery,
+  unequipSlot,
+  unlockHints,
   weatherParamsFor,
 } from '../meta'
 import { createWorldView } from '../render'
@@ -76,16 +78,20 @@ export function startApp(root: HTMLElement): void {
     world.setAircraft(spec, liveryOf(spec.id))
     world.setGhosts([])
     mode = { kind: 'title', backdrop: flightModel.initialState(spec, route, weather) }
-    screens.showTitle(today, progress, AIRCRAFT, {
+    screens.showTitle(today, progress, AIRCRAFT, unlockHints(progress), {
       onFly: (routeId, aircraftId, ghostCode) => fly(routeId, aircraftId, decodeGhost(ghostCode)),
       onHangar: showHangar,
     })
   }
 
   const showHangar = (): void => {
-    screens.showHangar({ progress, aircraft: AIRCRAFT, upgrades: UPGRADES }, {
+    screens.showHangar({ progress, aircraft: AIRCRAFT, upgrades: UPGRADES, unlockHints: unlockHints(progress) }, {
       onEquip: (aircraftId, upgradeId) => {
         persist(equip(progress, aircraftId, upgradeId))
+        showHangar()
+      },
+      onUnequip: (aircraftId, slot) => {
+        persist(unequipSlot(progress, aircraftId, slot))
         showHangar()
       },
       onLivery: (aircraftId, color) => {
@@ -110,7 +116,7 @@ export function startApp(root: HTMLElement): void {
     flow.setWeather(weather)
     world.setRoute(route)
     world.setAircraft(spec, liveryOf(spec.id))
-    world.setGhosts(ghosts.map((ghost, i) => ({ ghost, color: GHOST_COLORS[i % GHOST_COLORS.length]!, showTrail: true })))
+    world.setGhosts(ghosts.map((ghost, i) => ({ ghost, spec: aircraftById(ghost.aircraftId), color: GHOST_COLORS[i % GHOST_COLORS.length]!, showTrail: true })))
 
     screens.hide()
     hud.setVisible(true)

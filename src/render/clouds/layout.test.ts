@@ -8,7 +8,7 @@ const opts = { seed: 184, sun, windDir: v3(1, 0, 0) }
 const storm: WeatherFeature = { kind: 'storm', id: 'cb', center: v3(50_000, 0, 0), radius: 5000, base: 1000, top: 12_000, strength: 25 }
 const updraft: WeatherFeature = { kind: 'updraft', id: 'up', center: v3(10_000, 0, 5000), radius: 2000, base: 500, top: 8000, strength: 15 }
 const thermal: WeatherFeature = { kind: 'thermal', id: 'th', center: v3(0, 0, 0), radius: 1000, base: 0, top: 2500, strength: 5 }
-const jet: WeatherFeature = { kind: 'jetstream', id: 'jet', path: [v3(0, 10_000, 0), v3(100_000, 10_500, 0)], radius: 1500, speed: 60 }
+const jet: WeatherFeature = { kind: 'jetstream', id: 'jet', path: [v3(0, 10_000, 0), v3(100_000, 10_500, 0)], radius: 1500, thickness: 800, speed: 60 }
 
 describe('layoutClouds', () => {
   it('is deterministic for a given seed and differs across seeds', () => {

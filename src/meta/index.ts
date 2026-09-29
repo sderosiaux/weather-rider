@@ -10,6 +10,8 @@ export {
   recordFlight,
   setLivery,
   unequip,
+  unequipSlot,
+  unlockHints,
   type AircraftId,
   type Board,
   type FlightRecord,

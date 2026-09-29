@@ -48,7 +48,7 @@ function richWeather(): WeatherField {
   stormSpots.forEach(([x, z], i) => extra.push({ kind: 'storm', id: `storm-${i}`, center: v3(x!, 0, z!), radius: r(3500, 6500), base: r(700, 1400), top: r(10_500, 13_500), strength: 25 }))
   for (let i = 0; i < 24; i++) extra.push({ kind: 'updraft', id: `up-x${i}`, center: v3(r(-5_000, 150_000), 0, r(-35_000, 35_000)), radius: r(1200, 2600), base: r(300, 900), top: r(4500, 8500), strength: r(8, 22) })
   for (let i = 0; i < 30; i++) extra.push({ kind: 'thermal', id: `th-${i}`, center: v3(r(-10_000, 150_000), 0, r(-35_000, 35_000)), radius: r(700, 1500), base: 0, top: r(1600, 3200), strength: r(3, 7) })
-  extra.push({ kind: 'jetstream', id: 'jet-2', path: [v3(-10_000, 11_500, 20_000), v3(60_000, 11_000, 5_000), v3(150_000, 11_800, -10_000)], radius: 2000, speed: 70 })
+  extra.push({ kind: 'jetstream', id: 'jet-2', path: [v3(-10_000, 11_500, 20_000), v3(60_000, 11_000, 5_000), v3(150_000, 11_800, -10_000)], radius: 2000, thickness: 1200, speed: 70 })
   extra.push({ kind: 'wake', id: 'wake-1', path: [v3(10_000, 7_200, -25_000), v3(130_000, 7_000, 30_000)], radius: 300, strength: 5 })
   return { ...base, features: [...base.features, ...extra] }
 }
@@ -82,7 +82,7 @@ applyClass(select.value as AircraftClass)
 select.addEventListener('change', () => applyClass(select.value as AircraftClass))
 
 const ghost = createFixtureGhost(3)
-view.setGhosts([{ ghost, color: '#ffc46b', showTrail: true }])
+view.setGhosts([{ ghost, spec: fixtureAircraft, color: '#ffc46b', showTrail: true }])
 
 const resize = (): void => view.resize(window.innerWidth, window.innerHeight)
 window.addEventListener('resize', resize)

@@ -1,4 +1,4 @@
-import type { FlightScore, LeaderboardEntry, PlayerProgress, UnlockRule } from '../core/types'
+import type { FlightScore, LeaderboardEntry, PlayerProgress, UnlockRule, UpgradeSlot } from '../core/types'
 import { findUpgrade, UPGRADES } from './upgrades'
 
 export const AIRCRAFT_ORDER = ['turboprop', 'regional', 'narrowbody', 'widebody', 'cargo', 'supersonic', 'experimental'] as const
@@ -140,4 +140,40 @@ export function setLivery(progress: PlayerProgress, aircraftId: string, color: s
   requireAircraft(progress, aircraftId)
   if (!LIVERY_RE.test(color)) throw new Error(`livery color must be #rrggbb, got "${color}"`)
   return { ...progress, livery: { ...progress.livery, [aircraftId]: color.toLowerCase() } }
+}
+
+const BOARD_LABEL: Readonly<Record<Board, string>> = { smooth: 'Smooth', speed: 'Speed', eco: 'Eco' }
+
+/**
+ * Why each locked aircraft is still locked, in player words. Unlocked aircraft are absent.
+ * Aircraft further down AIRCRAFT_ORDER than the next one to unlock only say what they wait for.
+ */
+export function unlockHints(progress: PlayerProgress): Readonly<Record<string, string>> {
+  const hints: Record<string, string> = {}
+  let previousLocked: AircraftId | null = null
+  for (const id of AIRCRAFT_ORDER) {
+    if (progress.unlockedAircraft.includes(id)) continue
+    if (previousLocked) {
+      hints[id] = `Unlock ${previousLocked} first`
+      continue
+    }
+    const r = AIRCRAFT_UNLOCKS[id]
+    const parts: string[] = []
+    const missingFlights = r.flights - progress.flights
+    if (missingFlights > 0) parts.push(`${missingFlights} more flight${missingFlights > 1 ? 's' : ''}`)
+    for (const b of BOARDS) {
+      const need = r.best[b]
+      if (need !== undefined && progress.best[b] < need) parts.push(`${BOARD_LABEL[b]} ${need}`)
+    }
+    hints[id] = parts.length > 0 ? parts.join(' · ') : 'Unlocks after your next flight'
+    previousLocked = id
+  }
+  return hints
+}
+
+/** Unequip whatever occupies `slot` on this aircraft (back to stock). */
+export function unequipSlot(progress: PlayerProgress, aircraftId: string, slot: UpgradeSlot): PlayerProgress {
+  const current = progress.loadouts[aircraftId] ?? []
+  const inSlot = current.find((id) => findUpgrade(id)?.slot === slot)
+  return inSlot ? unequip(progress, aircraftId, inSlot) : progress
 }

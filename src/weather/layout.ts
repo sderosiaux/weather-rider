@@ -368,7 +368,7 @@ export function generateLayout(params: WeatherParams): Layout {
     jets.push(jet)
     const path: Vec3[] = []
     for (let x = bmin.x; x <= bmax.x + 1; x += 4000) path.push(v3(x, jetY(jet, x), jetZ(jet, x)))
-    features.push({ kind: 'jetstream', id: `jet-${i + 1}`, path, radius: jet.rh, speed: jet.speed })
+    features.push({ kind: 'jetstream', id: `jet-${i + 1}`, path, radius: jet.rh, thickness: jet.rv, speed: jet.speed })
     let zLo = Infinity
     let zHi = -Infinity
     for (const q of path) {

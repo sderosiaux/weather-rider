@@ -11,13 +11,17 @@ import type {
   PlayerProgress,
   Route,
   Upgrade,
+  UpgradeSlot,
   WeatherField,
+  WeatherFeatureKind,
 } from './types'
 
 // ─── src/render ─────────────────────────────────────────────────────────────
 
 export interface GhostVisual {
   readonly ghost: Ghost
+  /** Airframe to draw (ghost.aircraftId resolved by the caller). */
+  readonly spec: AircraftSpec
   /** CSS color string. */
   readonly color: string
   /** Draw the full track as a persistent line in the sky (best routes of the day). */
@@ -88,17 +92,54 @@ export interface ResultsModel {
   readonly newlyUnlocked: readonly string[]
 }
 
+/** aircraftId → human hint for locked aircraft ("2 more flights", "Smooth score 450 needed"). Absent = unlocked. */
+export type UnlockHints = Readonly<Record<string, string>>
+
 export interface HangarModel {
   readonly progress: PlayerProgress
   readonly aircraft: readonly AircraftSpec[]
   readonly upgrades: readonly Upgrade[]
+  readonly unlockHints: UnlockHints
 }
 
 export interface Screens {
-  showTitle(daily: DailyWeather, progress: PlayerProgress, aircraft: readonly AircraftSpec[], cb: TitleCallbacks): void
+  showTitle(daily: DailyWeather, progress: PlayerProgress, aircraft: readonly AircraftSpec[], unlockHints: UnlockHints, cb: TitleCallbacks): void
   showResults(model: ResultsModel, cb: { onRetry(): void; onMenu(): void }): void
-  showHangar(model: HangarModel, cb: { onEquip(aircraftId: string, upgradeId: string): void; onLivery(aircraftId: string, color: string): void; onBack(): void }): void
+  showHangar(
+    model: HangarModel,
+    cb: { onEquip(aircraftId: string, upgradeId: string): void; onUnequip(aircraftId: string, slot: UpgradeSlot): void; onLivery(aircraftId: string, color: string): void; onBack(): void },
+  ): void
   hide(): void
+  dispose(): void
 }
 
 export type CreateScreens = (root: HTMLElement) => Screens
+
+// ─── src/audio ──────────────────────────────────────────────────────────────
+
+/** What the soundscape reacts to. Built by the game loop each frame. */
+export interface AudioFrame {
+  readonly airspeedMs: number
+  readonly throttle: number
+  readonly turbulence: number
+  readonly dominant: WeatherFeatureKind | null
+  /** Vertical wind at the aircraft (m/s), + = rising air. */
+  readonly verticalWindMs: number
+  readonly cloud: number
+  readonly stalled: boolean
+  readonly aircraftClass: AircraftSpec['class']
+}
+
+export interface AudioEngine {
+  /** Must be called from a user gesture (browser autoplay policy). Idempotent. */
+  resume(): void
+  update(frame: AudioFrame, dtReal: number): void
+  /** One-shot cues. */
+  cue(kind: 'arrived' | 'crashed' | 'overstressed' | 'unlock' | 'record'): void
+  /** 'menu' = ambient bed only, 'flight' = full soundscape. */
+  setScene(scene: 'menu' | 'flight'): void
+  setVolume(volume: number): void
+  dispose(): void
+}
+
+export type CreateAudio = () => AudioEngine

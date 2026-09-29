@@ -107,7 +107,7 @@ const log = (msg: string): void => console.info(`[ui sandbox] ${msg}`)
 
 const showTitle = (progress: PlayerProgress): void => {
   hud.setVisible(false)
-  screens.showTitle(daily, progress, aircraft, {
+  screens.showTitle(daily, progress, aircraft, {}, {
     onFly: (r, a, g) => {
       log(`onFly(${r}, ${a}, ${g ? JSON.stringify(g.slice(0, 40)) : 'null'})`)
       showHud()
@@ -118,7 +118,8 @@ const showTitle = (progress: PlayerProgress): void => {
 let hangarProgress = veteran
 const showHangar = (): void => {
   hud.setVisible(false)
-  screens.showHangar({ progress: hangarProgress, aircraft, upgrades }, {
+  screens.showHangar({ progress: hangarProgress, aircraft, upgrades, unlockHints: {} }, {
+    onUnequip: (a, slot) => log(`onUnequip(${a}, ${slot})`),
     onEquip: (a, u) => {
       log(`onEquip(${a}, ${u})`)
       const slot = upgrades.find((x) => x.id === u)!.slot

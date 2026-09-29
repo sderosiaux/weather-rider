@@ -41,7 +41,8 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
   }
 
   return {
-    showTitle(daily, progress, aircraft, cb) {
+    // unlockHints: wired by the ui owner in wave 2.
+    showTitle(daily, progress, aircraft, _unlockHints, cb) {
       for (const a of aircraft) names.set(a.id, a.name)
       mount(renderTitle(daily, progress, aircraft, cb, titleMemory), '.wr-btn--primary', null)
     },
@@ -53,6 +54,10 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
       for (const a of model.aircraft) names.set(a.id, a.name)
       for (const u of model.upgrades) names.set(u.id, u.name)
       mount(renderHangar(model, cb, hangarMemory), '.wr-trophy[aria-pressed="true"]', cb.onBack)
+    },
+    dispose() {
+      window.removeEventListener('keydown', onKey)
+      layer.remove()
     },
     hide() {
       layer.classList.add('is-hidden')

@@ -55,7 +55,7 @@ export const fixtureAircraft: AircraftSpec = {
 const features: readonly WeatherFeature[] = [
   { kind: 'updraft', id: 'up-1', center: v3(30_000, 0, 0), radius: 2500, base: 500, top: 9000, strength: 18 },
   { kind: 'downdraft', id: 'down-1', center: v3(55_000, 0, 4000), radius: 3000, base: 0, top: 8000, strength: -12 },
-  { kind: 'jetstream', id: 'jet-1', path: [v3(0, 9000, -5000), v3(100_000, 9500, 5000)], radius: 1500, speed: 60 },
+  { kind: 'jetstream', id: 'jet-1', path: [v3(0, 9000, -5000), v3(100_000, 9500, 5000)], radius: 1500, thickness: 800, speed: 60 },
 ]
 
 /**
