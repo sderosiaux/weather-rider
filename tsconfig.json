@@ -15,5 +15,5 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "sandbox"]
+  "include": ["src", "sandbox", "lab"]
 }
