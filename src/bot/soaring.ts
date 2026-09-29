@@ -71,7 +71,7 @@ export const ECO: SoaringProfile = {
   minClimbRate: 2.5,
   bankEnergy: true,
   maxDetour: 15_000,
-  timeBudget: 1.4,
+  timeBudget: 1.2,
   speed: 'range',
   ride: true,
   liftThrottle: 0,
@@ -138,19 +138,20 @@ export function createSoaringGuidance(
   const lineZ = (x: number): number => route.start.z + ((route.gate.z - route.start.z) * (x - route.start.x)) / Math.max(route.gate.x - route.start.x, 1)
   const descentSlope = perf.idleSlope * 0.7
 
-  // ── Jet: the one crossing the route closest to the line ──
+  // ── Jets: every jet whose core passes within reach of the line is a candidate ──
   const midX = (route.start.x + route.gate.x) / 2
-  const jet: Jet | null =
-    weather.features
-      .filter((f): f is Jet => f.kind === 'jetstream')
-      .map((j) => ({ j, core: jetCoreAt(j, midX) }))
-      .filter((c): c is { j: Jet; core: { y: number; z: number } } => c.core !== null && Math.abs(c.core.z - lineZ(midX)) < c.j.radius + 15_000)
-      .sort((a, b) => Math.abs(a.core.z - lineZ(midX)) - Math.abs(b.core.z - lineZ(midX)))[0]?.j ?? null
-  /** Lateral line to fly at altitude h: the jet core when inside its thickness and not too far off the route. */
-  const jetLateral = (x: number, h: number): number => {
-    if (!jet) return NaN
-    const core = jetCoreAt(jet, x)
-    return core && Math.abs(core.y - h) < jet.thickness && Math.abs(core.z - lineZ(x)) < 12_000 ? core.z : NaN
+  const routeLen = Math.hypot(route.gate.x - route.start.x, route.gate.z - route.start.z)
+  const jets = weather.features
+    .filter((f): f is Jet => f.kind === 'jetstream')
+    .filter((j) => {
+      const core = jetCoreAt(j, midX)
+      return core !== null && Math.abs(core.z - lineZ(midX)) < j.radius + 15_000
+    })
+  /** Lateral line to fly at altitude h along jet j: its core when inside its thickness and ≤ 20 km off the route. */
+  const lateralOf = (j: Jet | null) => (x: number, h: number): number => {
+    if (!j) return NaN
+    const core = jetCoreAt(j, x)
+    return core && Math.abs(core.y - h) < j.thickness && Math.abs(core.z - lineZ(x)) < 20_000 ? core.z : NaN
   }
 
   // ── Pre-flight altitude plan ──
@@ -160,21 +161,45 @@ export function createSoaringGuidance(
   const floor = lowGate
   const candidates = new Set<number>([Math.max(Math.round(route.start.y / 100) * 100, floor), floor])
   for (let h = 2000; h <= hMax; h += 1000) if (h >= floor) candidates.add(h)
-  const jetCore = jet ? jetCoreAt(jet, midX) : null
-  if (jetCore && jetCore.y <= hMax) candidates.add(Math.round(jetCore.y / 100) * 100)
-  const options = altitudeOptions(spec, route, weather, perf, lowGate, [...candidates].sort((a, b) => a - b), jetLateral)
+  const plain = altitudeOptions(spec, route, weather, perf, lowGate, [...candidates].sort((a, b) => a - b))
+  // One option per jet, flown along its core; the sideways detour (out and back) is charged in time and fuel.
+  const jetOptions = jets.flatMap((j) => {
+    const core = jetCoreAt(j, midX)!
+    if (core.y > hMax) return []
+    const [o] = altitudeOptions(spec, route, weather, perf, lowGate, [Math.round(core.y / 100) * 100], lateralOf(j))
+    if (!o) return []
+    const off = Math.abs(core.z - lineZ(midX))
+    const detour = 2 * (Math.hypot(routeLen / 2, off) - routeLen / 2)
+    const extra = detour / Math.max(spec.cruiseSpeedMs + o.tailwind, 50)
+    return [{ jet: j, option: { ...o, timeS: o.timeS + extra, fuelKg: o.fuelKg * (1 + extra / Math.max(o.timeS, 1)) } }]
+  })
+  const options = [...plain, ...jetOptions.map((c) => c.option)]
   const cost = (o: AltitudeOption): number =>
     !o.feasible || o.timeS > deadline * 0.95
       ? Infinity
       : (P.timeWeight * o.timeS) / ref.timeS + (P.fuelWeight * o.fuelKg) / ref.fuelKg + 3 * Math.max(0, o.turbulence - 0.2)
+  const highestJet = jetOptions.map((c) => c.jet).sort((a, b) => (jetCoreAt(b, midX)?.y ?? 0) - (jetCoreAt(a, midX)?.y ?? 0))[0] ?? null
+  let jet: Jet | null = null
   let cruiseAltitude: number
   if (typeof P.cruise === 'number') cruiseAltitude = Math.min(P.cruise, hMax)
   else if (P.cruise === 'start') cruiseAltitude = Math.max(route.start.y, floor)
-  else if (P.cruise === 'jet') cruiseAltitude = jetCore ? Math.min(jetCore.y, hMax) : hMax
-  else {
-    const best = options.reduce<AltitudeOption | null>((b, o) => (cost(o) < (b ? cost(b) : Infinity) ? o : b), null)
+  else if (P.cruise === 'jet') {
+    jet = highestJet
+    const core = jet ? jetCoreAt(jet, midX) : null
+    cruiseAltitude = core ? Math.min(core.y, hMax) : hMax
+  } else {
+    let best: AltitudeOption | null = null
+    for (const o of plain) if (cost(o) < (best ? cost(best) : Infinity)) best = o
+    for (const c of jetOptions) {
+      if (cost(c.option) < (best ? cost(best) : Infinity)) {
+        best = c.option
+        jet = c.jet
+      }
+    }
     cruiseAltitude = best ? best.altitude : route.start.y
   }
+  const jetCore = jet ? jetCoreAt(jet, midX) : null
+  const jetLateral = lateralOf(jet)
   const gateAlt = P.glideDown ? lowGate : gateAltitude(route, cruiseAltitude)
   const followJet = !!jetCore && Math.abs(jetCore.y - cruiseAltitude) < (jet?.thickness ?? 0) * 0.6
   onPlan?.({ cruiseAltitude, followJet, options })
@@ -286,8 +311,11 @@ export function createSoaringGuidance(
     const finalLeg = Math.max(8000, 2.5 * Math.sqrt(3000 * turnRadius(state.airspeed, 25 * DEG)))
     // Aim 10 km ahead on the preferred lateral line (the jet core when riding it), the gate on final.
     const aheadX = Math.min(pos.x + 10_000, route.gate.x)
-    const jz = followJet && d > 25_000 ? jetLateral(aheadX, h) : NaN
-    const aim = d > Math.max(20_000, 1.5 * finalLeg) ? v3(aheadX, 0, Number.isNaN(jz) ? lineZ(aheadX) : jz) : route.gate
+    // Leave a jet beside the line early enough to come back across: ~3 km of run per km of offset.
+    const offLine = Math.abs(pos.z - lineZ(pos.x))
+    const lineUp = Math.max(20_000, 1.5 * finalLeg, 3 * offLine + 8000)
+    const jz = followJet && d > lineUp ? jetLateral(aheadX, jetCoreAt(jet!, aheadX)?.y ?? h) : NaN
+    const aim = d > lineUp ? v3(aheadX, 0, Number.isNaN(jz) ? lineZ(aheadX) : jz) : route.gate
     const baseTrack = bearingTo(pos, aim)
     if (P.avoid && state.t - lastAvoidT >= 1 && d > finalLeg) {
       lastAvoidT = state.t

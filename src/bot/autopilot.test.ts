@@ -33,10 +33,10 @@ describe('autopilots on the fixture sky', () => {
     expect(fly('reckless').simTimeS).toBeLessThan(direct.simTimeS * 0.97)
   })
 
-  it('eco circles the fixture updraft with the glider and banks the altitude', () => {
+  it('eco with time to spare circles the fixture updraft with the glider and banks the altitude', () => {
     const spec = aircraftById('experimental')
     const events: string[] = []
-    const r = runFlight(spec, fixtureRoute, weather, createAutopilot('eco', spec, fixtureRoute, weather, { trace: (_t, e) => events.push(e) }))
+    const r = runFlight(spec, fixtureRoute, weather, createAutopilot('eco', spec, fixtureRoute, weather, { profile: { timeBudget: 1.4 }, trace: (_t, e) => events.push(e) }))
     expect(r.outcome).toBe('arrived')
     expect(events.some((e) => e.startsWith('orbit up-1'))).toBe(true)
     expect(r.maxAltitude).toBeGreaterThan(fixtureRoute.start.y + 1000)

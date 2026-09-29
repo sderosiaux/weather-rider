@@ -114,6 +114,18 @@ const BLOCK_LINE_SEVERITY = 0.6
 const CLEAR_LINE_SEVERITY = 0.45
 /** Clearance between the straight line and a storm core edge on calm days (m). */
 const LINE_MARGIN = 3500
+/** Low jet core altitude range (m) and speed multiplier. Tuned by the balance lab (lab/reports/balance-loop.md). */
+const LOW_JET_MIN = 4000
+const LOW_JET_SPAN = 1500
+/** Low jet: lateral offset of its axis from the straight line (m), meander amplitude, horizontal half-width. */
+const LOW_JET_OFFSET = 9000
+const LOW_JET_OFFSET_SPAN = 4000
+const LOW_JET_MEANDER = 2500
+const LOW_JET_HALF_WIDTH = 4500
+const LOW_JET_BOOST = 2.2
+/** Background westerly (m/s) at the surface and aloft: negative = easterly headwind for eastbound routes down low. */
+const BG_SURFACE = -4
+const BG_ALOFT = 33
 const BG_K1 = TAU / 140_000
 const BG_K2 = TAU / 90_000
 const BG_K3 = TAU / 60_000
@@ -123,10 +135,10 @@ export function backgroundAngle(bg: BackgroundSpec, x: number, z: number, t: num
   return 0.3 * Math.sin(x * BG_K1 + bg.p1 + t * 0.0006) * Math.cos(z * BG_K2 + bg.p2) + 0.12 * Math.sin((x - z) * BG_K3 + bg.p3)
 }
 
-/** Westerly speed profile: ≈5 m/s at the surface, ≈30 m/s at 10 km. */
+/** Westerly speed profile: a light easterly (BG_SURFACE) near the ground, ≈29 m/s at 10 km. */
 export function backgroundSpeed(y: number): number {
   const s = y / 7000
-  return 5 + 28 * (1 - Math.exp(-s * s))
+  return BG_SURFACE + (BG_ALOFT - BG_SURFACE) * (1 - Math.exp(-s * s))
 }
 
 /** Lift scale: calm (≤ 3 m/s) at severity 0, ≥ 13 m/s from severity 0.2, 26 m/s at 1. */
@@ -391,18 +403,22 @@ export function generateLayout(params: WeatherParams): Layout {
     )
   }
 
-  // ── Jet streams: westerly, meandering across the corridor at 9–12 km.
+  // ── Jet streams: westerly, meandering across the corridor. The first is a low jet within climbing reach of
+  // the routes (the one worth hunting); the second is the classic high jet at 9–12 km.
   const rj = rngFor(0x1e7)
-  const nJets = 1 + (rj() < 0.35 + 0.4 * sev ? 1 : 0)
+  const nJets = 2
   const jets: JetSpec[] = []
   const midZ = fr.az + fr.uz * fr.len * 0.5
   for (let i = 0; i < nJets; i++) {
+    const low = i === 0
     const k1 = TAU / (70_000 + 90_000 * rj())
     const k2 = TAU / (25_000 + 25_000 * rj())
-    // Slopes capped so the jet keeps a strong eastward component everywhere.
-    const a1 = Math.min(4000 + 14_000 * rj(), 0.45 / k1)
-    const a2 = Math.min(1500 + 3000 * rj(), 0.12 / k2)
-    const z0 = i === 0 ? midZ + (rj() * 2 - 1) * 6000 : lerp(fr.minZ, fr.maxZ, rj())
+    // Slopes capped so the jet keeps a strong eastward component everywhere. The low jet barely meanders:
+    // it runs beside the straight line, so finding it is a decision, not luck.
+    const a1 = low ? LOW_JET_MEANDER * rj() : Math.min(4000 + 14_000 * rj(), 0.45 / k1)
+    const a2 = low ? Math.min(600 * rj(), 0.12 / k2) : Math.min(1500 + 3000 * rj(), 0.12 / k2)
+    const side = rj() < 0.5 ? -1 : 1
+    const z0 = low ? midZ + side * (LOW_JET_OFFSET + LOW_JET_OFFSET_SPAN * rj()) : midZ + (rj() * 2 - 1) * 6000
     const jet: JetSpec = {
       z0,
       a1,
@@ -411,13 +427,13 @@ export function generateLayout(params: WeatherParams): Layout {
       a2,
       k2,
       p2: rj() * TAU,
-      y0: Math.min(ceiling - 1500, 9900 + 1300 * rj()),
-      ay: 250 + 450 * rj(),
+      y0: low ? LOW_JET_MIN + LOW_JET_SPAN * rj() : Math.min(ceiling - 1500, 9900 + 1300 * rj()),
+      ay: low ? 150 + 250 * rj() : 250 + 450 * rj(),
       ky: TAU / (80_000 + 120_000 * rj()),
       py: rj() * TAU,
-      rh: 7000 + 5000 * rj(),
+      rh: low ? LOW_JET_HALF_WIDTH + 2000 * rj() : 7000 + 5000 * rj(),
       rv: 1400 + 500 * rj(),
-      speed: 40 + 50 * (0.2 + 0.8 * sev) * (0.6 + 0.4 * rj()),
+      speed: (40 + 50 * (0.2 + 0.8 * sev) * (0.6 + 0.4 * rj())) * (low ? LOW_JET_BOOST : 1),
       shearTurb: 0.2 + 0.45 * sev,
       ks: TAU / (40_000 + 40_000 * rj()),
       ps: rj() * TAU,
