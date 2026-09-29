@@ -1,5 +1,5 @@
 // App shell: title → flight → results, hangar. Owns persistence and wiring, no game rules.
-import type { AircraftSpec, DailyWeather, Ghost, PlayerProgress, Route } from '../core/types'
+import type { AircraftSpec, AircraftState, DailyWeather, Ghost, PlayerProgress } from '../core/types'
 import { AIRCRAFT, aircraftById, flightModel } from '../flight'
 import { createFlowLayer } from '../flow'
 import {
@@ -22,10 +22,10 @@ import { createFlightSession, type FlightSession } from './session'
 
 const GHOST_COLORS = ['#f4b860', '#8ec5ff', '#c9a7ff']
 
+/** Outside a flight the sky keeps moving around a parked aircraft (`backdrop`). */
 type Mode =
-  | { readonly kind: 'title'; readonly route: Route }
   | { readonly kind: 'flying'; readonly session: FlightSession }
-  | { readonly kind: 'results' }
+  | { readonly kind: 'title' | 'results'; readonly backdrop: AircraftState }
 
 export function startApp(root: HTMLElement): void {
   const canvas = document.createElement('canvas')
@@ -63,23 +63,19 @@ export function startApp(root: HTMLElement): void {
     }
   }
 
-  let mode: Mode = { kind: 'title', route: today.routes[0] }
-
-  const showScenery = (daily: DailyWeather, route: Route, spec: AircraftSpec): void => {
-    const weather = createWeather(weatherParamsFor(daily, route))
-    world.setWeather(weather)
-    flow.setWeather(weather)
-    world.setRoute(route)
-    world.setAircraft(spec, liveryOf(spec.id))
-  }
+  let mode: Mode
 
   const showTitle = (): void => {
     hud.setVisible(false)
     const route = today.routes[0]
     const spec = specFor(progress.unlockedAircraft[0] ?? AIRCRAFT[0]!.id)
-    showScenery(today, route, spec)
+    const weather = createWeather(weatherParamsFor(today, route))
+    world.setWeather(weather)
+    flow.setWeather(weather)
+    world.setRoute(route)
+    world.setAircraft(spec, liveryOf(spec.id))
     world.setGhosts([])
-    mode = { kind: 'title', route }
+    mode = { kind: 'title', backdrop: flightModel.initialState(spec, route, weather) }
     screens.showTitle(today, progress, AIRCRAFT, {
       onFly: (routeId, aircraftId, ghostCode) => fly(routeId, aircraftId, decodeGhost(ghostCode)),
       onHangar: showHangar,
@@ -134,7 +130,7 @@ export function startApp(root: HTMLElement): void {
     persist(recorded.progress)
     store.submit(recorded.entries)
     hud.setVisible(false)
-    mode = { kind: 'results' }
+    mode = { kind: 'results', backdrop: session.state() }
     screens.showResults(
       { score: outcome.score, route, dailyNumber: daily.number, aircraft: spec, ghostCode: outcome.ghostCode, previousBest, newlyUnlocked: recorded.newlyUnlocked },
       { onRetry: () => fly(route.id, spec.id, session.setup.ghosts[0] ?? null), onMenu: showTitle },
@@ -162,14 +158,10 @@ export function startApp(root: HTMLElement): void {
       flow.update(world.camera, session.state().t, dtReal)
       if (outcome) finish(session, outcome)
     } else {
-      // Title/results backdrop: the sky keeps moving around a parked aircraft.
       titleT += dtReal
       input.read()
-      const route = mode.kind === 'title' ? mode.route : today.routes[0]
-      const spec = specFor(progress.unlockedAircraft[0] ?? AIRCRAFT[0]!.id)
-      const idle = { ...flightModel.initialState(spec, route), t: titleT }
-      world.update({ state: idle, ghostPoses: [], dtReal })
-      flow.update(world.camera, titleT, dtReal)
+      world.update({ state: mode.backdrop, ghostPoses: [], dtReal })
+      flow.update(world.camera, mode.backdrop.t + titleT, dtReal)
     }
     world.render()
     requestAnimationFrame(loop)
