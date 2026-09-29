@@ -198,14 +198,15 @@ export function createSampler(params: WeatherParams, layout: Layout): Sampler {
     acc[FWX] = acc[FWX]! + radial * dx
     acc[FWZ] = acc[FWZ]! + radial * dz
 
-    // Anvil: flat fan downwind of the top, stretched along the upper wind (same shape render draws).
-    const ax = dx - c.anvilX * 0.9 * R
-    const az = dz - c.anvilZ * 0.9 * R
+    // Anvil: flat fan downwind of the top, stretched along the upper wind. Same shape render
+    // draws (render 28e37d0): centre 1.3 R downwind, semi-axes 3.0 R × 1.75 R, from 74% of the tower up.
+    const ax = dx - c.anvilX * 1.3 * R
+    const az = dz - c.anvilZ * 1.3 * R
     const along = ax * c.anvilX + az * c.anvilZ
     const across = az * c.anvilX - ax * c.anvilZ
-    const anvilBottom = base + 0.78 * (top - base)
+    const anvilBottom = base + 0.74 * (top - base)
     const ay = (y - 0.5 * (anvilBottom + top)) / (0.5 * (top - anvilBottom) + 300)
-    const qa = (along * along) / (11.56 * R * R) + (across * across) / (4.84 * R * R) + ay * ay
+    const qa = (along * along) / (9 * R * R) + (across * across) / (3.0625 * R * R) + ay * ay
     const ka = qa < 1 ? (1 - qa) * (1 - qa) : 0
 
     u = (y - base + 800) / 1300
