@@ -70,10 +70,11 @@ function cumulusBody(
   const height = top - base
   const r0 = profile(0)
   // Flat base: wide, squashed puffs that give cumulus their shelf.
-  const baseCount = Math.max(4, Math.round(r0 / (puffScale * 0.7)) * 2)
+  // Fill the whole base disk: gaps between dark belly puffs read as lit shards.
+  const baseCount = Math.max(4, Math.round(((r0 / puffScale) ** 2) * 1.2))
   for (let i = 0; i < baseCount; i++) {
-    const a = (i / baseCount) * Math.PI * 2 + rng() * 0.4
-    const rr = r0 * range(rng, 0.15, 0.8)
+    const a = rng() * Math.PI * 2
+    const rr = r0 * Math.sqrt(rng()) * 0.85
     const s = puffScale * range(rng, 0.9, 1.3)
     out.push(blob(cx + Math.cos(a) * rr, base + s * 0.28, cz + Math.sin(a) * rr, s * 1.25, s * 0.5, TILE_FLAT_BASE, rng, 0.9, darkBase, base, top))
   }
@@ -92,7 +93,8 @@ function cumulusBody(
     }
     // Core filler keeps the body opaque when seen through the ring gaps.
     if (r > puffScale * 0.9) {
-      const s = r * 0.85
+      // Kept inside the ring: an oversized filler pokes out as a flat disc.
+      const s = Math.min(r * 0.6, puffScale * 1.3)
       out.push(blob(cx + range(rng, -0.2, 0.2) * r, y, cz + range(rng, -0.2, 0.2) * r, s, s * 0.9, TILE_BILLOW, rng, 0.7, darkBase * (1 - h), base, top))
     }
   }
@@ -107,46 +109,66 @@ function cumulusBody(
   }
 }
 
-/** Cumulonimbus: massive tower, anvil sheared downwind, dark belly, rain shaft. */
+/**
+ * Cumulonimbus: the one cloud that must read as danger from 80 km away. Drawn bigger than its core radius
+ * (the feature radius is the violent core, the cloud mass around it is wider), a bruised belly, a vast
+ * anvil sheared downwind, an overshooting dome and rain curtains to the sea.
+ */
 function storm(f: Column, rng: Rng, windDir: Vec3, out: Puff[]): void {
-  const R = f.radius
+  const R = f.radius * 1.3
   const base = Math.max(f.base, 600)
-  const anvilBottom = base + (f.top - base) * 0.78
-  const towerTop = base + (f.top - base) * 0.9
-  const puff = R * 0.42
-  cumulusBody(f.center.x, f.center.z, base, towerTop, (h) => R * (0.95 - 0.3 * h + 0.15 * Math.sin(h * 5)), puff, rng, out, 0.55)
+  const anvilBottom = base + (f.top - base) * 0.74
+  const towerTop = base + (f.top - base) * 0.92
+  // Many mid-sized billows, not a few giant ones: at storm scale single puffs read as discs.
+  const puff = R * 0.26
+  cumulusBody(f.center.x, f.center.z, base, towerTop, (h) => R * (1.0 - 0.35 * h + 0.12 * Math.sin(h * 5)), puff, rng, out, 0.85)
 
-  // Anvil: wide flattened sheet spreading downwind, thinning at its edges.
-  const anvilR = R * range(rng, 2.4, 3.2)
-  const shift = R * 0.9
+  // Anvil: a dense flat-topped shelf spreading downwind, thinning into fibres at its rim.
+  const anvilR = R * range(rng, 2.0, 2.6)
+  const shift = R * 1.0
   const acx = f.center.x + windDir.x * shift
   const acz = f.center.z + windDir.z * shift
-  const anvilCount = Math.round(36 + (anvilR / puff) * 8)
+  // The anvil keeps broad puffs: small flat ones stack up like plates.
+  const anvilPuff = R * 0.42
+  const anvilCount = Math.round(40 + (anvilR / anvilPuff) * 8)
   for (let i = 0; i < anvilCount; i++) {
     const a = rng() * Math.PI * 2
     const rn = Math.sqrt(rng())
     const rr = anvilR * rn
     // Stretched along the wind: anvils are fans, not discs.
-    const along = Math.cos(a) * rr * 1.25
-    const across = Math.sin(a) * rr * 0.8
+    const along = Math.cos(a) * rr * 1.3
+    const across = Math.sin(a) * rr * 0.75
     const x = acx + windDir.x * along - windDir.z * across
     const z = acz + windDir.z * along + windDir.x * across
-    const s = puff * range(rng, 1.0, 1.6) * (1 - 0.35 * rn)
-    const y = anvilBottom + (f.top - anvilBottom) * (0.35 + 0.5 * (1 - rn)) + range(rng, -0.1, 0.1) * s
-    out.push(blob(x, y, z, s * 2.2, s * 0.5, pick(rng, TILE_BILLOW_2, TILE_FLAT_BASE), rng, 0.5 * (1 - 0.6 * rn * rn), 0, anvilBottom - (f.top - anvilBottom), f.top))
+    const s = anvilPuff * range(rng, 1.1, 1.7) * (1 - 0.3 * rn)
+    // Flat top, thickest near the tower, underside in shadow.
+    const thick = (f.top - anvilBottom) * (1 - 0.6 * rn)
+    const y = f.top - s * 0.3 - thick * rng() * 0.8
+    const under = y < f.top - thick * 0.5
+    out.push(blob(x, y, z, s * 2.0, s * 0.8, pick(rng, TILE_BILLOW_2, TILE_FLAT_BASE), rng, 0.85 * (1 - 0.55 * rn * rn), under ? 0.45 : 0, anvilBottom - (f.top - anvilBottom), f.top))
   }
-  // Overshooting top.
-  for (let i = 0; i < 4; i++) {
-    const s = puff * range(rng, 0.6, 0.9)
-    out.push(blob(f.center.x + range(rng, -0.3, 0.3) * R, f.top - s * 0.2, f.center.z + range(rng, -0.3, 0.3) * R, s, s * 0.8, TILE_BILLOW, rng, 0.9, 0, base, f.top))
+  // Fibrous rim: the anvil frays into cirrus downwind.
+  for (let i = 0; i < 14; i++) {
+    const a = (rng() - 0.5) * 1.6
+    const dx = windDir.x * Math.cos(a) - windDir.z * Math.sin(a)
+    const dz = windDir.z * Math.cos(a) + windDir.x * Math.sin(a)
+    const d = anvilR * range(rng, 1.0, 1.4)
+    out.push(streak(acx + dx * d, f.top - range(rng, 200, 900), acz + dz * d, anvilPuff * range(rng, 0.4, 0.7), anvilR * range(rng, 0.2, 0.35), { x: dx, y: 0, z: dz }, 0.3, 0, f.top - 2000, f.top, rng))
   }
-  // Rain shaft: dark vertical veils from the base down to the sea.
-  const shafts = 6 + Math.floor(rng() * 4)
+  // Overshooting dome above the anvil.
+  for (let i = 0; i < 6; i++) {
+    const s = puff * range(rng, 0.7, 1.0)
+    out.push(blob(f.center.x + range(rng, -0.3, 0.3) * R, f.top + s * 0.1, f.center.z + range(rng, -0.3, 0.3) * R, s, s * 0.75, TILE_BILLOW, rng, 0.9, 0, base, f.top + s))
+  }
+  // Rain shaft: dark curtains from the base down to the sea.
+  const shafts = 14 + Math.floor(rng() * 6)
   for (let i = 0; i < shafts; i++) {
     const a = rng() * Math.PI * 2
-    const rr = R * 0.6 * Math.sqrt(rng())
+    const rr = R * 0.7 * Math.sqrt(rng())
     const halfLen = base * 0.5
-    out.push(streak(f.center.x + Math.cos(a) * rr, halfLen, f.center.z + Math.sin(a) * rr, R * range(rng, 0.25, 0.45), halfLen, UP, 0.28, 0.7, 0, base, rng))
+    // Curtains must stay taller than wide, or the streak texture collapses into a dark disc.
+    const halfWidth = Math.min(R * range(rng, 0.15, 0.3), halfLen * 0.45)
+    out.push(streak(f.center.x + Math.cos(a) * rr, halfLen, f.center.z + Math.sin(a) * rr, halfWidth, halfLen, UP, 0.35, 0.85, 0, base, rng))
   }
 }
 
@@ -189,7 +211,7 @@ function virga(f: Column, rng: Rng, out: Puff[]): void {
 }
 
 /** Streaks laid along a polyline: jet cirrus (wide, high) and traffic wakes (old contrails). */
-function alongPath(path: readonly Vec3[], spread: number, spacing: number, width: [number, number], length: [number, number], opacity: number, rng: Rng, out: Puff[]): void {
+function alongPath(path: readonly Vec3[], spread: number, vSpread: number, spacing: number, width: [number, number], length: [number, number], opacity: number, rng: Rng, out: Puff[]): void {
   for (let s = 0; s + 1 < path.length; s++) {
     const a = path[s]!
     const b = path[s + 1]!
@@ -203,7 +225,7 @@ function alongPath(path: readonly Vec3[], spread: number, spacing: number, width
       const off = spread * (rng() * 2 - 1)
       const x = a.x + dx * t - axis.z * off
       const z = a.z + dz * t + axis.x * off
-      const y = a.y + dy * t + spread * 0.25 * (rng() * 2 - 1)
+      const y = a.y + dy * t + vSpread * (rng() * 2 - 1)
       // Cirrus bands drift a few degrees off the flow.
       const yaw = (rng() - 0.5) * 0.12
       const c = Math.cos(yaw), si = Math.sin(yaw)
@@ -217,11 +239,11 @@ function alongPath(path: readonly Vec3[], spread: number, spacing: number, width
 function shearSheet(f: Extract<WeatherFeature, { kind: 'shear' }>, rng: Rng, out: Puff[]): void {
   const w = f.extentMax.x - f.extentMin.x
   const d = f.extentMax.z - f.extentMin.z
-  const spacing = Math.max(7000, Math.sqrt((w * d) / 120))
+  const spacing = Math.max(12_000, Math.sqrt((w * d) / 60))
   for (let x = f.extentMin.x + spacing / 2; x < f.extentMax.x; x += spacing) {
     for (let z = f.extentMin.z + spacing / 2; z < f.extentMax.z; z += spacing) {
       const s = spacing * range(rng, 0.6, 0.9)
-      out.push(blob(x + range(rng, -0.4, 0.4) * spacing, f.altitude + range(rng, -0.3, 0.3) * f.thickness, z + range(rng, -0.4, 0.4) * spacing, s, s * 0.12, TILE_FLAT_BASE, rng, 0.18, 0, f.altitude - f.thickness, f.altitude + f.thickness))
+      out.push(blob(x + range(rng, -0.4, 0.4) * spacing, f.altitude + range(rng, -0.3, 0.3) * f.thickness, z + range(rng, -0.4, 0.4) * spacing, s, s * 0.12, TILE_FLAT_BASE, rng, 0.05, 0, f.altitude - f.thickness, f.altitude + f.thickness))
     }
   }
 }
@@ -232,7 +254,7 @@ const UP: Vec3 = { x: 0, y: 1, z: 0 }
  * Sun self-shadowing inside one cloud: each puff is dimmed by the puffs lying between it and the sun.
  * O(n²) per cluster, done once per setWeather.
  */
-export function shadeCluster(puffs: readonly Puff[], sun: Vec3, strength = 0.9): Puff[] {
+export function shadeCluster(puffs: readonly Puff[], sun: Vec3, strength = 0.55): Puff[] {
   return puffs.map((p, i) => {
     let occ = 0
     for (let j = 0; j < puffs.length; j++) {
@@ -254,7 +276,7 @@ export function shadeCluster(puffs: readonly Puff[], sun: Vec3, strength = 0.9):
  * Neighbour-average the shade so light varies across the cloud body, not puff by puff
  * (raw per-puff occlusion reads as a patchwork of bubbles).
  */
-export function smoothShade(puffs: readonly Puff[], radiusScale = 1.6): Puff[] {
+export function smoothShade(puffs: readonly Puff[], radiusScale = 0.9): Puff[] {
   return puffs.map((p) => {
     let sum = 0
     let wsum = 0
@@ -288,10 +310,40 @@ export function layoutClouds(features: readonly WeatherFeature[], opts: LayoutOp
       case 'updraft': tower(f, rng, cluster); break
       case 'thermal': thermalCap(f, rng, cluster); break
       case 'downdraft': virga(f, rng, cluster); break
-      case 'jetstream': alongPath(f.path, f.radius * 1.6, 4200, [f.radius * 0.2, f.radius * 0.6], [5000, 13_000], 0.38, rng, cluster); break
-      case 'wake': alongPath(f.path, f.radius * 0.5, 1800, [f.radius * 0.1, f.radius * 0.2], [1500, 3000], 0.3, rng, cluster); break
+      case 'jetstream': alongPath(f.path, f.radius * 0.7, f.thickness * 0.6, 3000, [Math.min(2500, f.radius * 0.12), Math.min(5000, f.radius * 0.3)], [6000, 14_000], 0.24, rng, cluster); break
+      case 'wake': alongPath(f.path, f.radius * 0.5, f.radius * 0.1, 1800, [f.radius * 0.1, f.radius * 0.2], [1500, 3000], 0.3, rng, cluster); break
       case 'shear': shearSheet(f, rng, cluster); break
     }
+    for (const p of smoothShade(shadeCluster(cluster, opts.sun))) out.push(p)
+  }
+  return out
+}
+
+/**
+ * Decorative cloud banks beyond the playable bounds, so the horizon is never empty. Outside the bounds
+ * they can't be mistaken for weather the player could use.
+ */
+export function layoutHorizon(boundsMin: Vec3, boundsMax: Vec3, opts: LayoutOptions): Puff[] {
+  const rng = createRng(Math.imul(opts.seed | 0, 0x85ebca6b) ^ 0x5bd1e995)
+  const cx = (boundsMin.x + boundsMax.x) / 2
+  const cz = (boundsMin.z + boundsMax.z) / 2
+  const hx = (boundsMax.x - boundsMin.x) / 2
+  const hz = (boundsMax.z - boundsMin.z) / 2
+  const out: Puff[] = []
+  const banks = 34
+  for (let i = 0; i < banks; i++) {
+    const a = (i / banks) * Math.PI * 2 + rng() * 0.15
+    // Ellipse hugging the bounds, pushed far enough out that even a bank's anvil (~25 km reach) stays outside.
+    const d = range(rng, 35_000, 120_000)
+    const x = cx + Math.cos(a) * (hx + d)
+    const z = cz + Math.sin(a) * (hz + d)
+    const cluster: Puff[] = []
+    const r = range(rng, 3000, 7000)
+    const tall = rng() < 0.3
+    const base = range(rng, 900, 1600)
+    const top = tall ? range(rng, 9000, 13_000) : base + r * range(rng, 0.8, 1.4)
+    if (tall) storm({ center: { x, y: 0, z }, radius: r * 0.8, base, top }, rng, opts.windDir, cluster)
+    else cumulusBody(x, z, base, top, (h) => r * (1 - 0.4 * h), r * 0.55, rng, cluster, 0.3)
     for (const p of smoothShade(shadeCluster(cluster, opts.sun))) out.push(p)
   }
   return out

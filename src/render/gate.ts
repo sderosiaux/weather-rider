@@ -51,9 +51,11 @@ export function createGateLayer(atmosphere: AtmosphereUniforms, glow: THREE.Text
         // Window rims stay ~2 px wide at any distance.
         float lw = max(60.0, dist * 0.0015);
         float lip = exp(-pow((y - uWindow.x) / lw, 2.0)) + exp(-pow((y - uWindow.y) / lw, 2.0));
-        float pillar = exp(-max(uWindow.x - y, 0.0) / 1500.0) * exp(-max(y - uWindow.y, 0.0) / 3000.0);
+        float pillar = mix(exp(-max(uWindow.x - y, 0.0) / 1500.0) * exp(-max(y - uWindow.y, 0.0) / 3000.0), 1.0 - smoothstep(9000.0, 14000.0, y), smoothstep(25000.0, 80000.0, dist));
         float rays = 0.9 + 0.1 * sin(vAngle * 23.0 + y * 0.0015 - uTime * 0.4) * sin(vAngle * 9.0 - uTime * 0.15);
-        float a = facing * (0.006 * pillar + 0.022 * inWindow) * rays + lip * 0.3 * (0.3 + facing);
+        // Far away the window rims shrink to a glyph; hand over to the full-height beacon instead.
+        float far = smoothstep(25000.0, 80000.0, dist);
+        float a = facing * ((0.006 + 0.035 * far) * pillar + 0.022 * inWindow) * rays + lip * 0.3 * (0.3 + facing) * (1.0 - 0.8 * far);
         vec3 tr = fogTransmittance(vWorld);
         // Beacons must stay legible across the whole route: only part of the haze applies.
         float vis = mix(1.0, dot(tr, vec3(0.333)), 0.55);
