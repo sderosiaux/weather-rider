@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { v3 } from '../core/math'
 import { createRng } from '../core/rng'
 import type { MutableWeatherSample, Vec3, WeatherField, WeatherFeature, WeatherParams } from '../core/types'
+import { SEVERE_TURBULENCE } from '../core/constants'
+import { dailyWeatherFor, weatherParamsFor } from '../meta'
+import type { Route } from '../core/types'
 import { createWeather } from './index'
 
 const params = (seed: number, severity: number, gateZ = 0): WeatherParams => ({
@@ -248,6 +251,67 @@ describe('createWeather', () => {
     expect(Number.isFinite(acc)).toBe(true)
     expect(ms).toBeLessThan(150)
     expect(w.sample(p, 0, out)).toBe(out)
+  })
+})
+
+/** Storm-core encounters on the straight start→gate line flown at the start altitude. */
+function straightLine(w: WeatherField, route: Route) {
+  const { start, gate } = route
+  const len = Math.hypot(gate.x - start.x, gate.z - start.z)
+  const ux = (gate.x - start.x) / len
+  const uz = (gate.z - start.z) / len
+  let nearestCoreGap = Infinity
+  for (const f of w.features) {
+    if (f.kind !== 'storm') continue
+    const along = Math.min(len, Math.max(0, (f.center.x - start.x) * ux + (f.center.z - start.z) * uz))
+    const d = Math.hypot(f.center.x - (start.x + ux * along), f.center.z - (start.z + uz * along))
+    nearestCoreGap = Math.min(nearestCoreGap, d - 0.6 * f.radius)
+  }
+  const out = newOut()
+  let severeStorm = false
+  for (let s = 0; s <= len && !severeStorm; s += 200) {
+    for (let lat = -2000; lat <= 2000; lat += 1000) {
+      const smp = w.sample(v3(start.x + ux * s - uz * lat, start.y, start.z + uz * s + ux * lat), 0, out)
+      if (smp.dominant === 'storm' && smp.turbulence >= SEVERE_TURBULENCE) severeStorm = true
+    }
+  }
+  return { nearestCoreGap, severeStorm }
+}
+
+describe('routing decisions on real daily routes', () => {
+  it('rough days put a storm core on the straight line, calm days keep it clear', () => {
+    let rough = 0
+    let calm = 0
+    for (let n = 1; n <= 60; n++) {
+      const daily = dailyWeatherFor(n)
+      for (const route of daily.routes) {
+        const w = createWeather(weatherParamsFor(daily, route))
+        const line = straightLine(w, route)
+        if (route.severity >= 0.7) {
+          rough++
+          expect(line.nearestCoreGap, `#${n} ${route.id} sev ${route.severity}`).toBeLessThanOrEqual(2000)
+          expect(line.severeStorm, `#${n} ${route.id} severe turbulence on the line`).toBe(true)
+        } else if (route.severity <= 0.3) {
+          calm++
+          expect(line.nearestCoreGap, `#${n} ${route.id} sev ${route.severity}`).toBeGreaterThan(2000)
+          expect(line.severeStorm, `#${n} ${route.id}`).toBe(false)
+        }
+      }
+    }
+    expect(rough).toBeGreaterThanOrEqual(50)
+    expect(calm).toBeGreaterThanOrEqual(50)
+  })
+
+  it('draws towering storms on the extreme route', () => {
+    const tops: number[] = []
+    for (let n = 1; n <= 60; n++) {
+      const daily = dailyWeatherFor(n)
+      const w = createWeather(weatherParamsFor(daily, daily.routes[2]))
+      for (const f of w.features) if (f.kind === 'storm') tops.push(f.top)
+    }
+    tops.sort((a, b) => a - b)
+    expect(tops[Math.floor(tops.length * 0.1)]!).toBeGreaterThanOrEqual(11_000)
+    expect(tops[tops.length - 1]!).toBeLessThanOrEqual(13_500)
   })
 })
 

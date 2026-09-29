@@ -2,7 +2,7 @@
 // columns are looked up through a uniform xz grid so cost is bounded by local feature density.
 import { hashInts } from '../core/rng'
 import type { MutableWeatherSample, Vec3, WeatherFeatureKind, WeatherParams, WeatherSample } from '../core/types'
-import { STORM, THERMAL, UPDRAFT, backgroundAngle, backgroundSpeed, jetY, jetZ, type ColumnSpec, type Layout } from './layout'
+import { COLUMN_REACH, STORM, STORM_CORE, THERMAL, UPDRAFT, backgroundAngle, backgroundSpeed, jetY, jetZ, type ColumnSpec, type Layout } from './layout'
 import { createNoisePair } from './noise'
 
 const CELL = 4000
@@ -91,7 +91,7 @@ export function createSampler(params: WeatherParams, layout: Layout): Sampler {
   }
 
   const column = (c: ColumnSpec, dx: number, dz: number, d2: number, y: number) => {
-    const R = c.radius * 1.6
+    const R = c.radius * COLUMN_REACH
     const q = d2 / (R * R)
     if (q >= 1) return
     const k1 = 1 - q
@@ -142,7 +142,7 @@ export function createSampler(params: WeatherParams, layout: Layout): Sampler {
     const cosT = d2 > 1 ? (dx * c.flankX + dz * c.flankZ) / (r * R) : 0
     const flankW = S * ringK * (0.45 + 0.275 * (1 + cosT)) * envS
     // Chaotic core: moderate lift, violent turbulence.
-    const qc = r2 / 0.36
+    const qc = r2 / (STORM_CORE * STORM_CORE)
     const coreK = qc < 1 ? (1 - qc) * (1 - qc) : 0
     const coreW = 0.3 * S * coreK * envS
     // Rear downdraft under the anvil, reaching the ground.
@@ -160,11 +160,14 @@ export function createSampler(params: WeatherParams, layout: Layout): Sampler {
     acc[FWX] = acc[FWX]! + radial * dx
     acc[FWZ] = acc[FWZ]! + radial * dz
 
-    // Anvil: flat lens downwind of the top.
+    // Anvil: flat fan downwind of the top, stretched along the upper wind (same shape render draws).
     const ax = dx - c.anvilX * 0.9 * R
     const az = dz - c.anvilZ * 0.9 * R
-    const ay = (y - (top - 900)) / 1100
-    const qa = (ax * ax + az * az) / (5.29 * R * R) + ay * ay
+    const along = ax * c.anvilX + az * c.anvilZ
+    const across = az * c.anvilX - ax * c.anvilZ
+    const anvilBottom = base + 0.78 * (top - base)
+    const ay = (y - 0.5 * (anvilBottom + top)) / (0.5 * (top - anvilBottom) + 300)
+    const qa = (along * along) / (11.56 * R * R) + (across * across) / (4.84 * R * R) + ay * ay
     const ka = qa < 1 ? (1 - qa) * (1 - qa) : 0
 
     const envT = ss(base - 800, base + 500, y) * (1 - ss(top, top + 1200, y))
