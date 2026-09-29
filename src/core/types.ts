@@ -148,7 +148,8 @@ export interface AircraftState {
 }
 
 export interface FlightModel {
-  initialState(spec: AircraftSpec, route: Route): AircraftState
+  /** Starts trimmed at route.start with airspeed = cruise in the local wind (ground vel = air vel + wind). */
+  initialState(spec: AircraftSpec, route: Route, weather: WeatherField): AircraftState
   /** Pure: same inputs → same output. dt is always SIM_DT. */
   step(spec: AircraftSpec, state: AircraftState, controls: Controls, weather: WeatherField, route: Route, dt: number): AircraftState
 }

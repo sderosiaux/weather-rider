@@ -53,7 +53,7 @@ export function createFlightSession(setup: FlightSetup): FlightSession {
   const pace: GhostPace | null = setup.ghosts[0] ? createGhostPace(setup.ghosts[0], route) : null
   const sample: MutableWeatherSample = { wind: { x: 0, y: 0, z: 0 }, turbulence: 0, dominant: null, cloud: 0 }
 
-  let state = flightModel.initialState(spec, route)
+  let state = flightModel.initialState(spec, route, weather)
   let acc = 0
   let outcome: FlightOutcome | null = null
   recorder.push(state)
