@@ -1,5 +1,4 @@
 // App shell: title → flight → results, hangar. Owns persistence and wiring, no game rules.
-import { DAILY_EPOCH_UTC_MS } from '../core/constants'
 import type { AircraftSpec, DailyWeather, Ghost, PlayerProgress, Route } from '../core/types'
 import { AIRCRAFT, aircraftById, flightModel } from '../flight'
 import { createFlowLayer } from '../flow'
@@ -8,6 +7,7 @@ import {
   applyLoadout,
   createStore,
   dailyWeather,
+  dailyWeatherFor,
   equip,
   parseShareHash,
   recordFlight,
@@ -20,10 +20,7 @@ import { createHud, createInput, createScreens } from '../ui'
 import { createWeather } from '../weather'
 import { createFlightSession, type FlightSession } from './session'
 
-const DAY_MS = 86_400_000
 const GHOST_COLORS = ['#f4b860', '#8ec5ff', '#c9a7ff']
-
-const dailyFromNumber = (n: number): DailyWeather => dailyWeather(new Date(DAILY_EPOCH_UTC_MS + (n - 1) * DAY_MS + DAY_MS / 2))
 
 type Mode =
   | { readonly kind: 'title'; readonly route: Route }
@@ -105,7 +102,7 @@ export function startApp(root: HTMLElement): void {
 
   /** A friend's ghost carries its own day: fly that day's sky and route so the race is fair. */
   const fly = (routeId: string, aircraftId: string, friendGhost: Ghost | null): void => {
-    const daily = friendGhost ? dailyFromNumber(friendGhost.dailyNumber) : today
+    const daily = friendGhost ? dailyWeatherFor(friendGhost.dailyNumber) : today
     const route = daily.routes.find((r) => r.id === (friendGhost?.routeId ?? routeId))
     if (!route) throw new Error(`Route ${routeId} not found in WORLD WEATHER #${daily.number}`)
     const spec = specFor(aircraftId)
