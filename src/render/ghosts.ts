@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import type { GhostVisual } from '../core/presentation'
 import type { GhostSample } from '../core/types'
 import { ATMOSPHERE_GLSL, type AtmosphereUniforms } from './atmosphere'
+import { buildAircraft } from './aircraft/models'
 import { createRibbon, type Ribbon } from './ribbon'
 
 /** Trail keeps one ghost sample in TRAIL_STRIDE (10 Hz → 2 Hz, ~75 m spacing at cruise). */
@@ -20,9 +21,7 @@ interface GhostEntry {
 
 export interface GhostLayer {
   readonly group: THREE.Group
-  set(ghosts: readonly GhostVisual[], airframe: THREE.BufferGeometry | null): void
-  /** Swap the airframe shape (ghosts reuse the player's class: GhostVisual carries no aircraft class). */
-  setAirframe(airframe: THREE.BufferGeometry | null): void
+  set(ghosts: readonly GhostVisual[]): void
   update(poses: readonly GhostSample[]): void
   setPixelAngle(a: number): void
   dispose(): void
@@ -67,7 +66,8 @@ export function createGhostLayer(atmosphere: AtmosphereUniforms, glow: THREE.Tex
   const group = new THREE.Group()
   let entries: GhostEntry[] = []
   let pixelAngle = 0.0008
-  const empty = new THREE.BufferGeometry()
+  /** Airframes built for the current ghost set, shared per class and size. */
+  let airframes = new Map<string, THREE.BufferGeometry>()
 
   const clear = (): void => {
     for (const e of entries) {
@@ -81,17 +81,25 @@ export function createGhostLayer(atmosphere: AtmosphereUniforms, glow: THREE.Tex
       }
     }
     entries = []
+    for (const g of airframes.values()) g.dispose()
+    airframes = new Map()
   }
 
   return {
     group,
-    set(ghosts, airframe) {
+    set(ghosts) {
       clear()
       entries = ghosts.map((g) => {
+        const key = `${g.spec.class}:${g.spec.lengthM}`
+        let airframe = airframes.get(key)
+        if (!airframe) {
+          airframe = buildAircraft(g.spec.class, g.spec.lengthM, '#ffffff').geometry
+          airframes.set(key, airframe)
+        }
         const color = new THREE.Color(g.color)
         const root = new THREE.Group()
         const material = ghostMaterial(atmosphere, color)
-        const body = new THREE.Mesh(airframe ?? empty, material)
+        const body = new THREE.Mesh(airframe, material)
         body.renderOrder = 35
         root.add(body)
         const beaconGeo = new THREE.BufferGeometry()
@@ -131,9 +139,6 @@ export function createGhostLayer(atmosphere: AtmosphereUniforms, glow: THREE.Tex
         return { root, body, material, beacon, beaconMat, beaconGeo, trail }
       })
     },
-    setAirframe(airframe) {
-      for (const e of entries) e.body.geometry = airframe ?? empty
-    },
     update(poses) {
       entries.forEach((e, i) => {
         const p = poses[i]
@@ -150,7 +155,6 @@ export function createGhostLayer(atmosphere: AtmosphereUniforms, glow: THREE.Tex
     },
     dispose() {
       clear()
-      empty.dispose()
     },
   }
 }

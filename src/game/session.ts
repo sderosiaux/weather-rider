@@ -13,6 +13,7 @@ import type {
   Route,
   Vec3,
   WeatherField,
+  WeatherSample,
 } from '../core/types'
 import { flightModel } from '../flight'
 import { createGhostRecorder, createScoreTracker, ghostCodec } from '../scoring'
@@ -44,6 +45,8 @@ export interface FlightSession {
   /** Advance the sim by wall-clock dt. Returns the outcome once the flight ended. */
   advance(dtReal: number, controls: Controls): FlightOutcome | null
   hud(): HudModel
+  /** Air at the aircraft now. Reused object: read it, don't keep it. */
+  air(): WeatherSample
   ghostPoses(): readonly GhostSample[]
   /** Dev only: move the aircraft keeping its velocity/orientation (debug deep links). */
   teleport(pos: Vec3): void
@@ -97,6 +100,7 @@ export function createFlightSession(setup: FlightSetup): FlightSession {
         ghostDeltaS: pace ? pace.deltaS(state.t, state.pos) : null,
       })
     },
+    air: () => weather.sample(state.pos, state.t, sample),
     ghostPoses: () => setup.ghosts.map((g) => ghostCodec.poseAt(g, state.t)),
     teleport(pos) {
       state = { ...state, pos }

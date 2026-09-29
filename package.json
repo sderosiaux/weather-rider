@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lab": "vitest run --config vitest.lab.config.ts"
+    "lab": "vitest run --config vitest.lab.config.ts",
+    "bench": "vitest bench --run"
   },
   "dependencies": {
     "three": "^0.186.1"
