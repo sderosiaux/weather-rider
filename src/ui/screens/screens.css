@@ -1083,3 +1083,7 @@
 @media (prefers-reduced-motion: reduce) {
   .wr-screen { animation: none; }
 }
+.wr-hangar__fit > .wr-sheet__title + .wr-slot,
+.wr-hangar__fit > .wr-hangar__locked-note + .wr-slot {
+  border-top: 0;
+}
