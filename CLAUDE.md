@@ -20,5 +20,8 @@ Game spec + architecture decisions: `SPEC.md`. Read §10 before coding.
 - Visual modules: `pnpm dev`, open your `sandbox/<module>.html`, take a screenshot (agent-browser / chrome-agent skill) and look at it. "It compiles" is not done.
 - Tests: Vitest, colocated `*.test.ts`. Real scenarios and invariants over coverage.
 
+## Clean up before reporting
+- Stop your dev server and close every browser you opened (`agent-browser close`, or the chrome-agent equivalent) before your final message. Idle headless Chromes pile up on the user's machine.
+
 ## Final report format
 done / verified (commands + outcome) / not done / contract changes requested / fragile spots.
