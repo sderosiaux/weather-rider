@@ -48,6 +48,12 @@ export interface WorldView {
   update(frame: WorldFrame): void
   render(): void
   resize(width: number, height: number): void
+  /**
+   * Hangar showcase: while set, the view ignores update()'s flight state and shows this airframe
+   * as a trophy (slow turntable, studio-like sky light, livery visible) framed in the LEFT ~60% of
+   * the canvas (the hangar UI panel covers the right side). null = back to the flight view.
+   */
+  setShowcase(showcase: { readonly spec: AircraftSpec; readonly liveryColor: string } | null): void
   dispose(): void
 }
 
@@ -71,6 +77,8 @@ export type CreateFlowLayer = (scene: THREE.Scene) => FlowLayer
 export interface Hud {
   update(model: HudModel): void
   setVisible(visible: boolean): void
+  /** Settings.coaching; the hud keeps its own lesson memory, this only switches hints on/off. */
+  setCoaching(enabled: boolean): void
   dispose(): void
 }
 
@@ -79,7 +87,22 @@ export type CreateHud = (root: HTMLElement) => Hud
 export interface TitleCallbacks {
   onFly(routeId: string, aircraftId: string, ghostCode: string | null): void
   onHangar(): void
+  onSettings(): void
 }
+
+/** Player preferences. Persisted by the game shell; edited by ui; applied by the shell to input/audio/flow/coach. */
+export interface Settings {
+  /** true = pull back (mouse/stick down, S) to pitch up, like a real aircraft. */
+  readonly invertPitch: boolean
+  /** 0..1 */
+  readonly volume: number
+  /** 0..1, wind particle intensity (accessibility / preference). */
+  readonly flowIntensity: number
+  /** In-flight coaching hints. */
+  readonly coaching: boolean
+}
+
+export const DEFAULT_SETTINGS: Settings = { invertPitch: false, volume: 0.8, flowIntensity: 1, coaching: true }
 
 /** Something the flight just unlocked, resolved to a display name by the caller. */
 export interface UnlockedItem {
@@ -114,8 +137,17 @@ export interface Screens {
   showResults(model: ResultsModel, cb: { onRetry(): void; onMenu(): void }): void
   showHangar(
     model: HangarModel,
-    cb: { onEquip(aircraftId: string, upgradeId: string): void; onUnequip(aircraftId: string, slot: UpgradeSlot): void; onLivery(aircraftId: string, color: string): void; onBack(): void },
+    cb: {
+      onEquip(aircraftId: string, upgradeId: string): void
+      onUnequip(aircraftId: string, slot: UpgradeSlot): void
+      onLivery(aircraftId: string, color: string): void
+      /** The aircraft currently shown/selected in the hangar changed (drives the 3D showcase). */
+      onSelectAircraft(aircraftId: string): void
+      onBack(): void
+    },
   ): void
+  /** Changes apply live (onChange on every edit); onBack closes. */
+  showSettings(settings: Settings, cb: { onChange(settings: Settings): void; onBack(): void }): void
   hide(): void
   dispose(): void
 }

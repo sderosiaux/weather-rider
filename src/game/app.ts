@@ -18,7 +18,7 @@ import {
 } from '../meta'
 import { createAudio } from '../audio'
 import { createAutopilot, STRATEGIES, type Autopilot, type Strategy } from '../bot'
-import type { UnlockedItem } from '../core/presentation'
+import { DEFAULT_SETTINGS, type Settings, type UnlockedItem } from '../core/presentation'
 import { createWorldView } from '../render'
 import { ghostCodec } from '../scoring'
 import { createHud, createInput, createScreens } from '../ui'
@@ -57,6 +57,31 @@ export function startApp(root: HTMLElement): void {
   const unlockAudio = (): void => audio.resume()
   window.addEventListener('pointerdown', unlockAudio)
   window.addEventListener('keydown', unlockAudio)
+
+  // Settings are shell-owned: ui edits them, the shell persists and applies them to every module.
+  const SETTINGS_KEY = 'weather-rider/settings'
+  const loadSettings = (): Settings => {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY)
+      const parsed = raw ? (JSON.parse(raw) as Partial<Settings>) : {}
+      return {
+        invertPitch: typeof parsed.invertPitch === 'boolean' ? parsed.invertPitch : DEFAULT_SETTINGS.invertPitch,
+        volume: typeof parsed.volume === 'number' ? Math.min(1, Math.max(0, parsed.volume)) : DEFAULT_SETTINGS.volume,
+        flowIntensity: typeof parsed.flowIntensity === 'number' ? Math.min(1, Math.max(0, parsed.flowIntensity)) : DEFAULT_SETTINGS.flowIntensity,
+        coaching: typeof parsed.coaching === 'boolean' ? parsed.coaching : DEFAULT_SETTINGS.coaching,
+      }
+    } catch {
+      return DEFAULT_SETTINGS
+    }
+  }
+  const applySettings = (s: Settings): void => {
+    input.setInvertPitch(s.invertPitch)
+    audio.setVolume(s.volume)
+    flow.setIntensity(s.flowIntensity)
+    hud.setCoaching(s.coaching)
+  }
+  let settings = loadSettings()
+  applySettings(settings)
 
   const persist = (p: PlayerProgress): void => {
     progress = p
@@ -107,8 +132,26 @@ export function startApp(root: HTMLElement): void {
     screens.showTitle(today, progress, AIRCRAFT, unlockHints(progress), {
       onFly: (routeId, aircraftId, ghostCode) => fly(routeId, aircraftId, decodeGhost(ghostCode)),
       onHangar: showHangar,
+      onSettings: showSettings,
     })
   }
+
+  const showSettings = (): void => {
+    screens.showSettings(settings, {
+      onChange: (next) => {
+        settings = next
+        applySettings(next)
+        try {
+          localStorage.setItem(SETTINGS_KEY, JSON.stringify(next))
+        } catch (err) {
+          console.warn('Settings not saved', err)
+        }
+      },
+      onBack: showTitle,
+    })
+  }
+
+  const showcase = (aircraftId: string): void => world.setShowcase({ spec: specFor(aircraftId), liveryColor: liveryOf(aircraftId) })
 
   const showHangar = (): void => {
     screens.showHangar({ progress, aircraft: AIRCRAFT, upgrades: UPGRADES, unlockHints: unlockHints(progress) }, {
@@ -124,7 +167,11 @@ export function startApp(root: HTMLElement): void {
         persist(setLivery(progress, aircraftId, color))
         showHangar()
       },
-      onBack: showTitle,
+      onSelectAircraft: showcase,
+      onBack: () => {
+        world.setShowcase(null)
+        showTitle()
+      },
     })
   }
 

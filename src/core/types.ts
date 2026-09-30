@@ -325,5 +325,6 @@ export interface HudModel {
 export interface InputSource {
   /** Poll once per frame. */
   read(): Controls
+  setInvertPitch(invert: boolean): void
   dispose(): void
 }
