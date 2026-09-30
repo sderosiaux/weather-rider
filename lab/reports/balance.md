@@ -32,23 +32,24 @@ g) surfer vs direct speed board, mod+ext: median 20.0%   (want ≥+10%)
 <!-- findings:start -->
 ## Findings
 
-### Wave 3: current tuning (balance-loop.md #1–13)
+### Wave 3: current tuning (balance-loop.md #1–25)
 
-The promise now holds on the real models. Surfer vs direct: −16 % time and −15 % fuel (median, all tiers), faster in 90 % of pairs, cheaper in 93 %. The best weather-aware pilot beats the best naive one on the speed board in 84 % of moderate+extreme pairs (median +10.5 %, calm 96 %) and on the eco board in 91 % (+28 %). Eco vs eco-naive: −26 % fuel and −12 % time, so reading the sky beats flying slow now that the eco board keeps a timetable.
+The promise holds on the real models. Surfer vs direct: −16.5 % time and −18 % fuel (median, all tiers), faster in 91 % of pairs, cheaper in 96 %. On boards normalised per aircraft (1000 = the aircraft flown well without reading the sky), the best weather-aware pilot beats the best blind one on speed in 83 % of moderate+extreme pairs (+12.7 %), on eco in 96 % (+32.5 %), on smooth in 97 % of extreme pairs. Surfer vs direct on the speed board: +20 % (median, moderate+extreme).
 
-What changed it, in order of effect:
-1. A low jet (core 4–5.5 km, 2.2× the old speed) runs 9–13 km beside the straight line with little meander. Finding it is a lateral decision the straight-line pilot never makes, and it sits in the band the routes already fly, so there is no 150 km climb to pay. The planner fix that came with it (evaluate every jet, not the nearest one) was a bot weakness: before it the surfer ignored this jet.
-2. Scoring shares boards across aircraft fairly: speed and eco ratios are raised to (cruise/222)^0.7 and (cruise/222)^1.2, smooth rates discomfort against the airframe's ride (gust·cabin/0.6)^0.8, and every airframe has maxSpeed/cruise ≈ 1.14. Per-route board leaders: smooth regional 48 %, speed experimental 50 %, eco supersonic 45 % (was 100/100/74 %).
-3. Eco timetable: full score up to 1.25 × reference time, halved every 0.25 × after.
-4. Fuel tanks sized so direct lands with 22.5 % (17–30 % by aircraft); reckless empties the tank on 4 extreme flights (and on calm/moderate ones, where it glides in).
-5. Weather utilization counts delivered thrust and this airframe's trimmed drag: surfer p50 31 %.
+What does it, by module:
+- weather: a low jet (core 4–5.5 km, 2.2× speed) runs 8–12 km beside the straight line with little meander, so riding it is a sideways decision that doesn't cost a 150 km climb. Moderate routes (from severity 0.35) get a storm beside the line, extreme ones a core on it; calm stays clear.
+- flight: fuel flow follows delivered thrust (throttle · lapse). Tanks are sized so a direct flight lands with ~17 %. Turbulence fatigue grows with airspeed, so every airframe pays about the same for a core. maxSpeed/cruise is ≈ 1.14 everywhere. The turboprop cruises at 205 m/s and the supersonic at 265 m/s, so their flights last 6–12 minutes.
+- scoring: each board is referenced on the aircraft's analytic blind flight (full throttle straight line, best-range straight line at its best altitude, trimmed direct in the route's background air). The weather's gain is put on a shared footing (speed ratio^((V_full/222)^1.05), eco 1000·(1 + (V_range/222)^0.55 · ln ratio), smooth relative to the airframe's own reference). Eco is log-scaled with a timetable. Comfort ignores steady g (5 s high-pass). Weather utilization now reads direct 5 %, surfer 32 %, eco 53 %.
+- meta: routes 95–145 km. Aircraft unlocks: narrowbody smooth 800, widebody speed 1050, cargo eco 1100, supersonic speed 1150, experimental smooth 1050 / speed 1150 / eco 1200. Upgrade score unlocks sit at 1050–1500. Blind players stall after the narrowbody, a surfer-only player after the widebody, a player who picks the style per board unlocks everything by flight 20. Upgrades come about one per flight.
+- bot (weaknesses fixed, not tuning): the planner evaluates every jet, and jet riders leave the jet in time to line up for the gate.
+
+Per-route board leaders: smooth narrowbody 45 %, speed supersonic 48 %, eco supersonic 48 % (was 100/100/74 %).
 
 Still open:
-- 4 % of arrivals keep more than 60 % fuel: eco flights that ride jets and lift well. That is the eco board working; I'd drop "nobody > 60 %" rather than starve the tanks further.
-- Direct flight length: airliners stay in 9–11 min, but the supersonic takes ~5 min and the turboprop/experimental 15–19 min (median). The routes are sized for 222 m/s, so this follows from cruise speeds (420 / 140 / 115 m/s), not from the weather. Fixing it means changing those airframes' identity or per-aircraft route lengths.
-- Unlock score thresholds still never bind (every player unlocks on flight count: 2/4/7/10/14/20; an eco-only player never reaches experimental's speed 750). progression.test pins narrowbody's smooth threshold between 200 and 300 and experimental's at 750 ×3, so I left the table alone.
-- 24 gate misses, all supersonic (the bot can't turn a 400 m/s aircraft into the gate after a jet leg that ends 10 km off the line).
-- Riding the jet costs comfort (surfer −11 comfort points vs direct: shear-layer turbulence), so the smooth board still favours the straight line on calm and moderate days (weather-aware ahead 43 % overall); on extreme days dodging the storm wins 97 % of pairs.
+- The experimental takes 13.8–19.7 minutes on a direct flight. Making it fast (≥ 200 m/s) breaks flight.test's "fixture updraft lifts the experimental ≥ 500 m" (434 m at 200 m/s): the glider identity and the 6–12 min rule can't both hold.
+- A direct pass through an extreme core costs a median 8.6 % stress (max 23 %; turboprop/experimental 11–12 %, widebody/cargo 4–5 %). flight.test caps the turboprop at < 60 % after 60 s in uniform severe air, which caps the rate; low-gust airframes stay under 10 %.
+- 3 % of arrivals keep > 60 % fuel: eco flights that read the sky well.
+- Riding the jet costs comfort in its shear layers, so on calm days the smooth board still favours flying straight.
 
 ### Wave 2 snapshot (before tuning)
 
