@@ -253,6 +253,7 @@ export function startApp(root: HTMLElement): void {
       routeId: route.id,
       aircraftId: spec.id,
       ghostCode: outcome.ghostCode,
+      pilot: settings.pilotName,
     })
     persist(recorded.progress)
     store.submit(recorded.entries)
