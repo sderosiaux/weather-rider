@@ -298,7 +298,7 @@ export function createSoaringGuidance(
     return c / n
   }
 
-  const gateHold = createGateHold(spec, route)
+  const gateHold = createGateHold(spec, route, trace)
   let mode: Mode = { kind: 'cruise' }
   let lastAvoidT = -Infinity
   let offset = 0
@@ -351,7 +351,9 @@ export function createSoaringGuidance(
 
     const base = { track, maxBank: 25 * DEG, speed, minThrottle: full ? 1 : 0, maxThrottle: 1, gLimit: CRUISE_G }
     const descending = target < h - 250
-    if (P.ride && air.windY > 2 && !descending && h < Math.min((P.bankEnergy ? hMax : planned) + 1500, hMax)) {
+    // No lift riding on the approach: rising air near the gate only pushes the aircraft out of the window.
+    const approaching = d < Math.max(30_000, 2 * lineUp)
+    if (P.ride && !approaching && air.windY > 2 && !descending && h < Math.min((P.bankEnergy ? hMax : planned) + 1500, hMax)) {
       // Rising air: stay level relative to the air mass and let it carry us up; the altitude is banked for later.
       return { ...base, vertical: { kind: 'air-path', gamma: 0 } }
     }
@@ -360,8 +362,9 @@ export function createSoaringGuidance(
       const rate = clamp(perf.climb(h).rate * 0.7, 2, 8)
       return { ...base, vertical: { kind: 'altitude', target, maxClimb: rate, maxSink: 8, tau: 25 } }
     }
-    if (P.glideDown && descending && !late) {
-      return { ...base, speed: perf.glideSpeed(h), vertical: { kind: 'speed' }, minThrottle: 0, maxThrottle: 0 }
+    if (P.glideDown && descending && !late && !approaching) {
+      // Gliding down: excess airspeed (leaving a jet, a gust) must not turn into a zoom climb.
+      return { ...base, speed: perf.glideSpeed(h), vertical: { kind: 'speed', maxGamma: 0 }, minThrottle: 0, maxThrottle: 0 }
     }
     if (descending) return { ...base, minThrottle: 0, vertical: { kind: 'altitude', target, maxClimb: 8, maxSink: Math.max(8, descentSlope * speed * 1.2), tau: 25 } }
     const vertical: Vertical = { kind: 'altitude', target, maxClimb: 8, maxSink: Math.max(8, descentSlope * speed * 1.2), tau: 25 }

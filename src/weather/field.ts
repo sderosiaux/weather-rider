@@ -257,7 +257,9 @@ export function createSampler(params: WeatherParams, layout: Layout): Sampler {
       const k = 1 - q * q * (3 - 2 * q)
       const sy = j.ay * j.ky * Math.cos(j.ky * x + j.py)
       const inv = 1 / Math.sqrt(1 + slope * slope + sy * sy)
-      const sp = j.speed * (0.85 + 0.15 * Math.sin(j.ks * x + j.ps)) * k
+      let fu = (x - j.fadeX0) / (j.fadeX1 - j.fadeX0)
+      const fade = fu <= 0 ? 1 : fu >= 1 ? 0 : ((fu = 1 - fu), fu * fu * (3 - 2 * fu))
+      const sp = j.speed * (0.85 + 0.15 * Math.sin(j.ks * x + j.ps)) * k * fade
       acc[JX] = acc[JX]! + sp * inv
       acc[JY] = acc[JY]! + sp * sy * inv
       acc[JZ] = acc[JZ]! + sp * slope * inv

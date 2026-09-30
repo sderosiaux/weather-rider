@@ -24,7 +24,7 @@ export type Vertical =
   /** Hold a flight-path angle relative to the air mass: rising air carries the aircraft up for free. */
   | { readonly kind: 'air-path'; readonly gamma: number }
   /** Hold the target airspeed with the stick (glider style): altitude is whatever the air and throttle give. */
-  | { readonly kind: 'speed' }
+  | { readonly kind: 'speed'; readonly maxGamma?: number }
 
 export interface Intent {
   readonly track: number
@@ -90,7 +90,7 @@ export function createInnerLoop(spec: AircraftSpec, weather: WeatherField, hands
       gammaTarget = intent.vertical.gamma
     } else {
       // Too fast → raise the nose; ≈ 8 s time constant on the speed error, at most ~2° of path change at a time.
-      gammaTarget = gamma + clamp((V - intent.speed) / (8 * 9.81), -0.035, 0.035)
+      gammaTarget = Math.min(gamma + clamp((V - intent.speed) / (8 * 9.81), -0.035, 0.035), intent.vertical.maxGamma ?? Infinity)
     }
     // Energy protection: trade altitude for speed near the stall, speed for altitude near overspeed.
     if (V < env.minTas || V > env.maxTas) gLimit = Math.max(gLimit, hands.gLimit)
@@ -113,7 +113,8 @@ export function createInnerLoop(spec: AircraftSpec, weather: WeatherField, hands
     let throttle =
       intent.fixedThrottle ?? throttleFor(spec, state, clamp(intent.speed, env.minTas, env.maxTas), gammaTarget, intent.minThrottle, intent.maxThrottle)
     if (V < env.minTas) throttle = Math.max(throttle, intent.maxThrottle)
-    if (V > env.maxTas) throttle = Math.min(throttle, intent.minThrottle)
+    // Overspeed: power off first (even on a full-throttle profile), so the energy protection doesn't have to zoom.
+    if (V > env.maxTas) throttle = 0
 
     if (state.stalled) {
       pitchTrim = 0
