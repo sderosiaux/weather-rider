@@ -12,6 +12,7 @@ import {
   wheelToThrottleDelta,
 } from './mapping'
 import { DISARMED, MENU_EVENT, stepStick, stickForNewFlight, type StickState } from './stick'
+import { createTouchControls, isDirectPointer } from '../touch/controls'
 import './input.css'
 
 export interface InputOptions {
@@ -24,9 +25,10 @@ export interface InputOptions {
  * Published on <html data-wr-stick>, read by the HUD (CSS only) to show the "take the controls" hint:
  * - disarmed: mouse stick inactive, nothing else used yet
  * - keys: mouse stick inactive, but the pilot is flying with keyboard/gamepad (hint would be noise)
+ * - touch: the pilot flies with the on-screen touch controls (hint would be noise)
  * - armed: pointer locked, the mouse steers
  */
-export type StickMode = 'disarmed' | 'keys' | 'armed'
+export type StickMode = 'disarmed' | 'keys' | 'touch' | 'armed'
 
 const MOUSE_SHAPE = { deadzone: 0.06, expo: 0.45 }
 /** Stick full deflection as a fraction of the smaller viewport side. */
@@ -36,6 +38,8 @@ const PAD_EXPO = 0.35
 const KEY_TAU = 0.16
 const MOUSE_TAU = 0.05
 const PAD_TAU = 0.04
+/** A lifted thumb recenters the stick about this fast; yaw pads are digital and ease like keys. */
+const TOUCH_TAU = 0.05
 const KEY_THROTTLE_RATE = 0.45
 const PAD_THROTTLE_RATE = 0.6
 const WHEEL_PER_PX = 0.0008
@@ -63,7 +67,7 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
   let usedKeysOrPad = false
   let mode: StickMode | null = null
 
-  const smoothed = { kPitch: 0, kRoll: 0, kYaw: 0, mPitch: 0, mRoll: 0, pPitch: 0, pRoll: 0, pYaw: 0 }
+  const smoothed = { kPitch: 0, kRoll: 0, kYaw: 0, mPitch: 0, mRoll: 0, pPitch: 0, pRoll: 0, pYaw: 0, tPitch: 0, tRoll: 0, tYaw: 0 }
 
   const reticle = document.createElement('div')
   reticle.className = 'wr-stick'
@@ -73,6 +77,13 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
 
   const isLocked = (): boolean => document.pointerLockElement === target
   const radiusPx = (rect: DOMRect): number => Math.max(40, Math.min(rect.width, rect.height) * MOUSE_RADIUS_FRACTION)
+
+  // Fingers take over from a captured mouse: release it so its stick glides back to neutral.
+  const touch = createTouchControls(target, () => {
+    if (isLocked()) document.exitPointerLock()
+  })
+  /** Type of the pointer behind the next click (pointerdown always precedes it). */
+  let lastPointerType = ''
 
   const publish = (next: StickMode): void => {
     if (next === mode) return
@@ -85,6 +96,7 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     if (e.metaKey || e.altKey) return
     keys.add(e.code)
     usedKeysOrPad = true
+    touch.disengage()
     e.preventDefault()
   }
   const onKeyUp = (e: KeyboardEvent): void => {
@@ -102,13 +114,19 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
   const onPointerLockChange = (): void => {
     if (isLocked()) {
       stick = stepStick(stick, { type: 'lock' })
+      touch.disengage()
     } else if (stick.armed) {
       stick = stepStick(stick, { type: 'unlock' })
       usedKeysOrPad = false
     }
   }
+  const onPointerDown = (e: PointerEvent): void => {
+    lastPointerType = e.pointerType
+  }
   const onClick = (e: MouseEvent): void => {
     if (isLocked()) return
+    // A tap is a finger on the touch controls: only a mouse takes the pointer.
+    if (isDirectPointer(lastPointerType)) return
     // Menus may sit over the target: clicking a control must not grab the pointer.
     if (e.target instanceof Element && e.target.closest('button, a, input, textarea, select, label, summary, [role="button"], .wr-screens')) return
     const req = target.requestPointerLock() as unknown
@@ -124,7 +142,10 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     for (const k of Object.keys(smoothed) as (keyof typeof smoothed)[]) smoothed[k] = 0
   }
   // A menu came up (it also releases pointer lock): the next flight starts disarmed at neutral.
-  const onMenu = (): void => releaseControls(DISARMED)
+  const onMenu = (): void => {
+    releaseControls(DISARMED)
+    touch.setFlight(null)
+  }
   const onWheel = (e: WheelEvent): void => {
     const px = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY
     pendingWheel += wheelToThrottleDelta(px, WHEEL_PER_PX)
@@ -136,6 +157,7 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
   document.addEventListener('focusin', onFocusIn)
   document.addEventListener('mousemove', onMouseMove)
   document.addEventListener('pointerlockchange', onPointerLockChange)
+  target.addEventListener('pointerdown', onPointerDown)
   target.addEventListener('click', onClick)
   target.addEventListener('wheel', onWheel, { passive: true })
   window.addEventListener(MENU_EVENT, onMenu)
@@ -185,16 +207,28 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
 
     // Gamepad
     const pad = readPad()
-    if (pad && (pad.pitch !== 0 || pad.roll !== 0 || pad.yaw !== 0 || pad.throttleRate !== 0)) usedKeysOrPad = true
+    if (pad && (pad.pitch !== 0 || pad.roll !== 0 || pad.yaw !== 0 || pad.throttleRate !== 0)) {
+      usedKeysOrPad = true
+      touch.disengage()
+    }
     smoothed.pPitch = smoothToward(smoothed.pPitch, pad?.pitch ?? 0, dt, PAD_TAU)
     smoothed.pRoll = smoothToward(smoothed.pRoll, pad?.roll ?? 0, dt, PAD_TAU)
     smoothed.pYaw = smoothToward(smoothed.pYaw, pad?.yaw ?? 0, dt, PAD_TAU)
 
+    // Touch: floating stick, yaw pads, throttle lever
+    const t = touch.sample(invertPitch)
+    smoothed.tPitch = smoothToward(smoothed.tPitch, t.pitch, dt, TOUCH_TAU)
+    smoothed.tRoll = smoothToward(smoothed.tRoll, t.roll, dt, TOUCH_TAU)
+    smoothed.tYaw = smoothToward(smoothed.tYaw, t.yaw, dt, KEY_TAU)
+
     throttle = integrateThrottle(throttle, kThrottleRate + (pad?.throttleRate ?? 0), dt)
     throttle = clamp(throttle + pendingWheel, 0, 1)
     pendingWheel = 0
+    // A held lever is in the hand: it sets the power outright.
+    if (t.throttle !== null) throttle = t.throttle
+    touch.render(throttle)
 
-    publish(stick.armed ? 'armed' : usedKeysOrPad ? 'keys' : 'disarmed')
+    publish(stick.armed ? 'armed' : touch.engaged ? 'touch' : usedKeysOrPad ? 'keys' : 'disarmed')
     reticle.classList.toggle('is-on', stick.armed)
     if (stick.armed) {
       reticle.style.left = `${rect.left + rect.width / 2}px`
@@ -204,9 +238,9 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     }
 
     return {
-      pitch: mixAxis([smoothed.pPitch, smoothed.kPitch, smoothed.mPitch]),
-      roll: mixAxis([smoothed.pRoll, smoothed.kRoll, smoothed.mRoll]),
-      yaw: mixAxis([smoothed.pYaw, smoothed.kYaw]),
+      pitch: mixAxis([smoothed.pPitch, smoothed.kPitch, smoothed.tPitch, smoothed.mPitch]),
+      roll: mixAxis([smoothed.pRoll, smoothed.kRoll, smoothed.tRoll, smoothed.mRoll]),
+      yaw: mixAxis([smoothed.pYaw, smoothed.kYaw, smoothed.tYaw]),
       throttle,
     }
   }
@@ -218,15 +252,17 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     document.removeEventListener('focusin', onFocusIn)
     document.removeEventListener('mousemove', onMouseMove)
     document.removeEventListener('pointerlockchange', onPointerLockChange)
+    target.removeEventListener('pointerdown', onPointerDown)
     target.removeEventListener('click', onClick)
     target.removeEventListener('wheel', onWheel)
     window.removeEventListener(MENU_EVENT, onMenu)
     if (isLocked()) document.exitPointerLock()
     delete document.documentElement.dataset.wrStick
     reticle.remove()
+    touch.dispose()
   }
 
-  // Applies to mouse, keys and gamepad from the next read(); the smoothed axes carry over so nothing jumps.
+  // Applies to mouse, keys, gamepad and touch from the next read(); the smoothed axes carry over so nothing jumps.
   const setInvertPitch = (invert: boolean): void => {
     invertPitch = invert
   }
@@ -236,6 +272,7 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
   const resetForFlight = (trim: number): void => {
     releaseControls(stickForNewFlight(isLocked()))
     throttle = flightStartThrottle(trim, throttle)
+    touch.setFlight(throttle)
   }
 
   return { read, setInvertPitch, resetForFlight, dispose }

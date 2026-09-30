@@ -1,0 +1,339 @@
+/* On-screen flight controls for touch. Glass like the HUD instruments, never on top of them:
+   the layer paints under the HUD, and its fixed parts sit in the bands the instruments leave free. */
+.wr-touch {
+  --wr-touch-glass: var(--wr-glass);
+  --wr-touch-glass-held: var(--wr-glass-heavy);
+  --wr-touch-edge: var(--wr-glass-edge);
+  --wr-touch-edge-held: var(--wr-frost-edge);
+  --wr-touch-blur: var(--wr-glass-blur);
+  --wr-touch-shadow: var(--wr-glass-shadow);
+  --wr-touch-ring: color-mix(in srgb, var(--wr-glass) 55%, transparent);
+  --wr-touch-fill: color-mix(in srgb, var(--wr-ink-soft) 22%, transparent);
+  --wr-touch-fill-held: color-mix(in srgb, var(--wr-ink-soft) 34%, transparent);
+  /* Pressed pad: an ink wash, readable over white cloud and dark storm alike. */
+  --wr-touch-pressed: color-mix(in srgb, var(--wr-ink) 14%, var(--wr-glass-heavy));
+  /* Inner hairline: defines glass over white cloud, where the white edge alone disappears. */
+  --wr-touch-outline: inset 0 0 0 1px var(--wr-hairline);
+  --wr-touch-knob: 56px;
+  --wr-touch-pad: 52px;
+  --wr-touch-glyph: 22px;
+  --wr-touch-track-w: 48px;
+  --wr-touch-track-max: 240px;
+  --wr-touch-track-min: 120px;
+  --wr-touch-fill-w: 4px;
+  --wr-touch-handle-w: 30px;
+  --wr-touch-handle-h: 4px;
+  /* The resting stick sits this far in from the left instruments column. */
+  --wr-touch-home-inset: 24px;
+  /* Clearances around the HUD instruments (src/ui/hud.css): altitude panel half-height + gap,
+     cabin panel height + gap. If the HUD grows, these grow with it. */
+  --wr-touch-clear-mid: 64px;
+  --wr-touch-clear-bottom: 98px;
+  /* Set per screen from JS (thumb travel for full deflection). */
+  --wr-touch-stick-r: 72px;
+
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+  font-family: var(--wr-font);
+  color: var(--wr-ink);
+  font-variant-numeric: tabular-nums lining-nums;
+  -webkit-font-smoothing: antialiased;
+  text-shadow: var(--wr-halo);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--wr-med) var(--wr-ease), visibility 0s linear var(--wr-med);
+}
+.wr-touch.is-on {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--wr-med) var(--wr-ease);
+}
+
+/* The flight view the fingers land on: no scroll, zoom, selection or callout. */
+.wr-touch-surface {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.wr-touch__label {
+  font-size: var(--wr-text-xs);
+  font-weight: var(--wr-weight-medium);
+  color: var(--wr-ink-soft);
+  letter-spacing: 0.02em;
+}
+/* Words sit on the open sky, not on a panel: a small glass pill keeps them readable over storm and cloud. */
+.wr-touch__tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--wr-space-1);
+  padding: 2px var(--wr-space-2);
+  border-radius: var(--wr-radius-pill);
+  background: var(--wr-touch-glass-held);
+  -webkit-backdrop-filter: var(--wr-touch-blur);
+  backdrop-filter: var(--wr-touch-blur);
+  white-space: nowrap;
+}
+
+/* ── Stick: resting ring in the free band between the speed and engine instruments ── */
+.wr-touch__home {
+  position: absolute;
+  left: calc(var(--wr-edge) + var(--wr-touch-home-inset));
+  top: calc(75% - var(--wr-edge) / 2);
+  width: calc(var(--wr-touch-stick-r) * 2);
+  height: calc(var(--wr-touch-stick-r) * 2);
+  transform: translateY(-50%);
+  border-radius: 50%;
+  border: 1px dashed var(--wr-touch-edge);
+  box-shadow: inset 0 0 0 1px var(--wr-hairline);
+  transition: opacity var(--wr-fast) var(--wr-ease);
+}
+.wr-touch__home-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--wr-touch-knob);
+  height: var(--wr-touch-knob);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--wr-touch-ring);
+  border: 1px solid var(--wr-touch-edge);
+  box-shadow: var(--wr-touch-shadow), var(--wr-touch-outline);
+}
+.wr-touch__home-label {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + var(--wr-touch-knob) / 2 + var(--wr-space-1));
+  transform: translateX(-50%);
+}
+.wr-touch.is-steering .wr-touch__home {
+  opacity: 0;
+}
+
+/* ── Stick: held, on the landing point ── */
+.wr-touch__stick {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  transition: opacity var(--wr-fast) var(--wr-ease);
+}
+.wr-touch.is-steering .wr-touch__stick {
+  opacity: 1;
+}
+.wr-touch__ring {
+  position: absolute;
+  left: calc(var(--wr-touch-stick-r) * -1);
+  top: calc(var(--wr-touch-stick-r) * -1);
+  width: calc(var(--wr-touch-stick-r) * 2);
+  height: calc(var(--wr-touch-stick-r) * 2);
+  border-radius: 50%;
+  background: var(--wr-touch-ring);
+  -webkit-backdrop-filter: var(--wr-touch-blur);
+  backdrop-filter: var(--wr-touch-blur);
+  border: 1px solid var(--wr-touch-edge);
+  box-shadow: var(--wr-touch-shadow), var(--wr-touch-outline);
+}
+/* Axis ticks: the stick's cross, faint. */
+.wr-touch__ring::before,
+.wr-touch__ring::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: var(--wr-hairline-strong);
+  border-radius: 1px;
+}
+.wr-touch__ring::before {
+  width: 1px;
+  height: calc(100% - var(--wr-space-4));
+  transform: translate(-50%, -50%);
+}
+.wr-touch__ring::after {
+  width: calc(100% - var(--wr-space-4));
+  height: 1px;
+  transform: translate(-50%, -50%);
+}
+.wr-touch__knob {
+  position: absolute;
+  left: calc(var(--wr-touch-knob) / -2);
+  top: calc(var(--wr-touch-knob) / -2);
+  width: var(--wr-touch-knob);
+  height: var(--wr-touch-knob);
+  border-radius: 50%;
+  background: var(--wr-touch-glass-held);
+  border: 1px solid var(--wr-touch-edge-held);
+  box-shadow: var(--wr-shadow-float), inset 0 0 0 1px var(--wr-hairline-strong);
+  will-change: transform;
+}
+/* The thumb's point, like the mouse stick dot. */
+.wr-touch__knob::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--wr-space-2);
+  height: var(--wr-space-2);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--wr-ink-soft);
+}
+
+/* ── Right thumb: yaw pads + throttle, in the band between the altitude and cabin instruments ── */
+.wr-touch__right {
+  position: absolute;
+  right: var(--wr-edge);
+  top: calc(50% + var(--wr-touch-clear-mid));
+  bottom: calc(var(--wr-edge) + var(--wr-touch-clear-bottom));
+  display: flex;
+  align-items: flex-end;
+  gap: var(--wr-space-4);
+}
+
+.wr-touch__yaw {
+  display: grid;
+  justify-items: center;
+  gap: var(--wr-space-1);
+}
+.wr-touch__pads {
+  display: flex;
+  gap: var(--wr-space-2);
+}
+.wr-touch__pad {
+  display: grid;
+  place-items: center;
+  width: var(--wr-touch-pad);
+  height: var(--wr-touch-pad);
+  border-radius: 50%;
+  background: var(--wr-touch-glass);
+  -webkit-backdrop-filter: var(--wr-touch-blur);
+  backdrop-filter: var(--wr-touch-blur);
+  border: 1px solid var(--wr-touch-edge);
+  box-shadow: var(--wr-touch-shadow), var(--wr-touch-outline);
+  color: var(--wr-ink-soft);
+  transition: background-color var(--wr-fast) var(--wr-ease), border-color var(--wr-fast) var(--wr-ease), transform var(--wr-fast) var(--wr-ease);
+}
+.wr-touch__pad.is-held {
+  background: var(--wr-touch-pressed);
+  border-color: var(--wr-touch-edge-held);
+  color: var(--wr-ink);
+  transform: scale(0.94);
+}
+.wr-touch__glyph {
+  width: var(--wr-touch-glyph);
+  height: var(--wr-touch-glyph);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wr-touch__throttle {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+}
+/* Floats left of the track top: the band's height all goes to travel. */
+.wr-touch__readout {
+  position: absolute;
+  right: calc(100% + var(--wr-space-2));
+  top: max(0px, calc(100% - var(--wr-touch-track-max)));
+}
+.wr-touch__value {
+  font-size: var(--wr-text-sm);
+  font-weight: var(--wr-weight-strong);
+  min-width: 3.2ch;
+  text-align: right;
+}
+.wr-touch__track {
+  position: relative;
+  flex: 0 1 var(--wr-touch-track-max);
+  min-height: var(--wr-touch-track-min);
+  width: var(--wr-touch-track-w);
+  border-radius: var(--wr-radius-pill);
+  background: var(--wr-touch-glass);
+  -webkit-backdrop-filter: var(--wr-touch-blur);
+  backdrop-filter: var(--wr-touch-blur);
+  border: 1px solid var(--wr-touch-edge);
+  box-shadow: var(--wr-touch-shadow), var(--wr-touch-outline);
+  transition: background-color var(--wr-fast) var(--wr-ease), border-color var(--wr-fast) var(--wr-ease);
+}
+.wr-touch__throttle.is-held .wr-touch__track {
+  background: var(--wr-touch-glass-held);
+  border-color: var(--wr-touch-edge-held);
+}
+/* Handle travel: the track minus its rounded ends. */
+.wr-touch__rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--wr-touch-track-w) / 2);
+  bottom: calc(var(--wr-touch-track-w) / 2);
+}
+.wr-touch__fill {
+  position: absolute;
+  left: calc((var(--wr-touch-track-w) - var(--wr-touch-fill-w)) / 2);
+  width: var(--wr-touch-fill-w);
+  top: 0;
+  bottom: 0;
+  border-radius: var(--wr-radius-pill);
+  background: var(--wr-touch-fill);
+  transform-origin: center bottom;
+  transform: scaleY(0);
+  will-change: transform;
+}
+.wr-touch__throttle.is-held .wr-touch__fill {
+  background: var(--wr-touch-fill-held);
+}
+/* The aircraft's trimmed power: where hands-off flight stays level. */
+.wr-touch__trim {
+  position: absolute;
+  left: calc(var(--wr-space-1) * -1);
+  width: var(--wr-space-3);
+  height: 2px;
+  bottom: 0;
+  transform: translateY(50%);
+  border-radius: 1px;
+  background: var(--wr-ink-soft);
+  box-shadow: var(--wr-halo);
+}
+.wr-touch__trim.is-off {
+  display: none;
+}
+.wr-touch__handle-carrier {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+.wr-touch__handle {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: var(--wr-touch-handle-w);
+  height: var(--wr-touch-handle-h);
+  transform: translate(-50%, 50%);
+  border-radius: var(--wr-radius-pill);
+  background: var(--wr-ink);
+  box-shadow: var(--wr-halo);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wr-touch,
+  .wr-touch.is-on,
+  .wr-touch__home,
+  .wr-touch__stick,
+  .wr-touch__pad,
+  .wr-touch__track {
+    transition: none;
+  }
+}
