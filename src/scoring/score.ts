@@ -1,5 +1,5 @@
 import { GRAVITY, SEA_LEVEL_AIR_DENSITY, SEVERE_TURBULENCE } from '../core/constants'
-import { airDensity, trimLevel } from '../flight'
+import { AIRCRAFT, airDensity, trimLevel } from '../flight'
 import type { AircraftSpec, AircraftState, CreateScoreTracker, FlightScore, Route, TelemetryFrame } from '../core/types'
 
 // ─── Comfort ────────────────────────────────────────────────────────────────
@@ -107,7 +107,15 @@ function bestRange(spec: AircraftSpec, h: number): { speed: number; kgPerM: numb
 
 const cache = new WeakMap<AircraftSpec, Map<string, ScoreReference>>()
 
-export function scoreReference(spec: AircraftSpec, route: Route): ScoreReference {
+/**
+ * The references are computed on the STOCK airframe of this id (hangar mods excluded): a board has to see what an
+ * upgrade costs or buys, otherwise a mod that makes the aircraft slower would have its handicap forgiven by a slower
+ * reference (SPEC §6). Unknown ids (fixtures, tests) are their own stock.
+ */
+const stockOf = (spec: AircraftSpec): AircraftSpec => AIRCRAFT.find((a) => a.id === spec.id) ?? spec
+
+export function scoreReference(loadoutSpec: AircraftSpec, route: Route): ScoreReference {
+  const spec = stockOf(loadoutSpec)
   const key = `${route.id}:${route.start.x},${route.start.z},${route.gate.x},${route.gate.z},${route.gateMinAlt},${route.gateMaxAlt},${route.severity}`
   const perSpec = cache.get(spec) ?? new Map<string, ScoreReference>()
   cache.set(spec, perSpec)

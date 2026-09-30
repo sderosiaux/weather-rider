@@ -10,18 +10,19 @@ export const BOARDS: readonly Board[] = ['smooth', 'speed', 'eco']
 /**
  * Aircraft unlock curve, the one tuning table (with upgrade thresholds in upgrades.ts).
  * Unlocks happen strictly in AIRCRAFT_ORDER: each needs the previous one plus its own rule.
- * Early aircraft reward showing up; later ones ask for a best score above 1000, which a blind flight never
- * reaches (boards read 1000 for flying the aircraft well without reading the sky): speed for the wide body and
- * the supersonic, eco for the cargo, all three for the experimental. Tuned with the balance lab.
+ * Early aircraft reward showing up; later ones ask for a best score on the board that matches their character
+ * (wide body = smooth, cargo = eco, supersonic = speed, experimental = all three), set well above 1000 (boards read
+ * 1000 for flying the aircraft well without reading the sky). Tuned with the balance lab: blind pilots stall around
+ * the narrow/wide body, a pilot who reads the sky with the right style per board unlocks everything by ~20 flights.
  */
 export const AIRCRAFT_UNLOCKS: Readonly<Record<AircraftId, { readonly flights: number; readonly best: Partial<Record<Board, number>> }>> = {
   turboprop: { flights: 0, best: {} },
   regional: { flights: 2, best: {} },
   narrowbody: { flights: 4, best: { smooth: 800 } },
-  widebody: { flights: 7, best: { speed: 1050 } },
-  cargo: { flights: 10, best: { eco: 1100 } },
+  widebody: { flights: 7, best: { smooth: 1300 } },
+  cargo: { flights: 10, best: { eco: 1250 } },
   supersonic: { flights: 14, best: { speed: 1150 } },
-  experimental: { flights: 20, best: { smooth: 1050, speed: 1150, eco: 1200 } },
+  experimental: { flights: 20, best: { smooth: 1300, speed: 1150, eco: 1300 } },
 }
 
 const LIVERY_RE = /^#[0-9a-f]{6}$/i

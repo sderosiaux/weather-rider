@@ -67,18 +67,18 @@ describe('recordFlight', () => {
     expect(fly(newProgress('Ada'), score('crashed', { smooth: 500 })).entries).toEqual([])
   })
 
-  it('flying blind (boards ≤ 1000) stalls after narrow body: the wide body asks for weather-read speed', () => {
+  it('flying blind (boards ≤ 1000) stalls after narrow body: the wide body asks for a smooth ride well above blind', () => {
     const p = flyN(newProgress('Grinder'), 100, score('arrived', { smooth: 700, speed: 700, eco: 700 }))
     expect(p.unlockedAircraft).toEqual(['turboprop', 'regional'])
     const q = flyN(newProgress('Grinder'), 100, score('arrived', { smooth: 1000, speed: 1000, eco: 1000 }))
     expect(q.unlockedAircraft).toEqual(['turboprop', 'regional', 'narrowbody'])
   })
 
-  it('experimental needs smooth 1050, speed 1150 and eco 1200', () => {
-    const almost = flyN(newProgress('Ace'), 30, score('arrived', { smooth: 1300, speed: 1300, eco: 1190 }))
+  it('experimental needs smooth 1300, speed 1150 and eco 1300', () => {
+    const almost = flyN(newProgress('Ace'), 30, score('arrived', { smooth: 1400, speed: 1400, eco: 1290 }))
     expect(almost.unlockedAircraft).not.toContain('experimental')
     expect(almost.unlockedAircraft).toContain('supersonic')
-    const r = fly(almost, score('arrived', { eco: 1210 }))
+    const r = fly(almost, score('arrived', { eco: 1310 }))
     expect(r.newlyUnlocked).toEqual(['experimental'])
     expect(r.progress.unlockedAircraft).toEqual([...AIRCRAFT_ORDER])
   })
@@ -94,7 +94,7 @@ describe('recordFlight', () => {
 
   it('reports upgrade unlocks by flights and by score', () => {
     const p = flyN(newProgress('Ada'), 1, score('arrived'))
-    const r = fly(p, score('arrived', { smooth: 1160 }))
+    const r = fly(p, score('arrived', { smooth: 1360 }))
     expect(r.newlyUnlocked).toEqual(expect.arrayContaining(['regional', 'wings-winglets', 'inst-gmeter']))
     expect(r.progress.unlockedUpgrades).toContain('wings-winglets')
   })

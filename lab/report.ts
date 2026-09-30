@@ -135,7 +135,7 @@ export function simulateUnlocks(
   rows: readonly FlightRow[],
   days: readonly number[],
   player: string,
-  choose: (nextLocked: string | null) => string,
+  choose: (nextLocked: string | null, flight: number) => string,
   cap = 120,
 ): UnlockRun {
   const byKey = new Map<string, FlightRow>()
@@ -150,7 +150,7 @@ export function simulateUnlocks(
         if (flights >= cap) break outer
         const aircraft = progress.unlockedAircraft[progress.unlockedAircraft.length - 1]!
         const next = AIRCRAFT_ORDER.find((id) => !progress.unlockedAircraft.includes(id)) ?? null
-        const row = byKey.get(`${day}:${tier}:${aircraft}:${choose(next)}`)
+        const row = byKey.get(`${day}:${tier}:${aircraft}:${choose(next, flights)}`)
         if (!row) continue
         const score: FlightScore = {
           status: row.outcome === 'arrived' ? 'arrived' : row.outcome === 'overstressed' ? 'overstressed' : 'crashed',
@@ -213,6 +213,8 @@ export interface ReportInput {
   readonly cpuS: number
   readonly ghostLinks: readonly { label: string; url: string }[]
   readonly findings: string
+  /** Hangar section (loadouts vs stock). */
+  readonly hangar: string
 }
 
 const BOARDS: readonly Board[] = ['smooth', 'speed', 'eco']
@@ -420,28 +422,30 @@ export function renderReport(inp: ReportInput): string {
   P('')
   P('Simulated players fly the lab days in order, three routes a day, always in their newest aircraft, recorded through meta.recordFlight. Cell = flight number of the unlock (— = not within 120 flights).')
   P('')
-  const players: [string, (next: string | null) => string][] = [
+  /** Picks, for the next locked aircraft, the pilot style of each board it asks for, cycling between them. */
+  const perBoard = (style: Record<Board, string>) => (next: string | null, flight: number): string => {
+    const need = next ? (Object.keys(AIRCRAFT_UNLOCKS[next as keyof typeof AIRCRAFT_UNLOCKS].best) as Board[]) : []
+    return need.length ? style[need[flight % need.length]!] : style.speed
+  }
+  const players: [string, (next: string | null, flight: number) => string][] = [
     ['direct', () => 'direct'],
     ['reckless', () => 'reckless'],
+    ['blind board-savvy (direct / reckless / eco-naive)', perBoard({ smooth: 'direct', speed: 'reckless', eco: 'eco-naive' })],
     ['surfer', () => 'surfer'],
     ['eco', () => 'eco'],
-    [
-      'board-savvy',
-      (next) => {
-        const need = next ? Object.keys(AIRCRAFT_UNLOCKS[next as keyof typeof AIRCRAFT_UNLOCKS].best) : []
-        if (need.length === 1 && need[0] === 'eco') return 'eco'
-        if (need.length === 1 && need[0] === 'speed') return 'surfer-fast'
-        return 'surfer-smooth'
-      },
-    ],
+    ['board-savvy (surfer-smooth / surfer-fast / eco)', perBoard({ smooth: 'surfer-smooth', speed: 'surfer-fast', eco: 'eco' })],
   ]
   P(`| player | ${AIRCRAFT_ORDER.join(' | ')} | upgrades unlocked at flight # |`)
   P(`|---|${AIRCRAFT_ORDER.map(() => '---').join('|')}|---|`)
   for (const [name, choose] of players) {
-    if (!pilotNames.includes(choose(null)) && name !== 'board-savvy') continue
     const run = simulateUnlocks(rows, inp.days, name, choose)
     P(`| ${name} | ${AIRCRAFT_ORDER.map((id) => (run.at[id] === null ? '—' : String(run.at[id]))).join(' | ')} | ${run.upgradeFlights.join(', ') || '—'} |`)
   }
+  P('')
+
+  P('### Hangar: loadouts vs stock')
+  P('')
+  P(inp.hangar)
   P('')
 
   // ── Ghosts ──
