@@ -21,6 +21,8 @@ it('balance matrix', async () => {
     if (shards.some((s) => s === null)) await sleep(1000)
   }
   const all = shards as ShardFile[]
+  const crashed = all.find((s) => s.error)
+  if (crashed) throw new Error(`shard ${crashed.shard} crashed:\n${crashed.error}`)
   const days = labDays()
   const order = (r: FlightRow): number => (r.day * 3 + ['calm', 'moderate', 'extreme'].indexOf(r.tier)) * 100
   const rows = all.flatMap((s) => s.rows).sort((a, b) => order(a) - order(b))

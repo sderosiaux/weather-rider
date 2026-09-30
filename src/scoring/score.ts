@@ -57,7 +57,7 @@ const RIDE_SEVERITY = 0.82
 const RIDE_EXP = 0.8
 /** Reference speed (m/s): the game cruise that maps routes to real block times (meta/daily REF_GAME_CRUISE_MS). */
 const V_REF = 80_000 / 360
-const SPEED_LEVERAGE = 0.7
+const SPEED_LEVERAGE = 0.62
 const ECO_LEVERAGE = 0.55
 const SMOOTH_GAIN = 1
 

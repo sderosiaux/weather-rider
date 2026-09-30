@@ -128,9 +128,9 @@ const LOW_JET_OFFSET_SPAN = 4000
 const LOW_JET_MEANDER = 2500
 const LOW_JET_HALF_WIDTH = 4500
 /** Low jet cap (m/s): faster than a turboprop's slow flight makes the way back upwind impossible. */
-const LOW_JET_MAX = 140
+const LOW_JET_MAX = 150
 /** The low jet fades out between these distances (m) before the gate abscissa. */
-const LOW_JET_FADE = [20_000, 8_000] as const
+const LOW_JET_FADE = [16_000, 6_000] as const
 const NO_FADE = 1e12
 const LOW_JET_BOOST = 2.2
 /** Background westerly (m/s) at the surface and aloft: negative = easterly headwind for eastbound routes down low. */
