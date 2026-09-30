@@ -146,7 +146,7 @@ export function runMatrix(
             outcome: r.outcome,
             simTimeS: s.simTimeS,
             refTimeS: ref.timeS,
-            refFuelKg: ref.fuelKg,
+            refFuelKg: ref.ecoFuelKg,
             fuelUsedKg: s.fuelUsedKg,
             fuelRemainingPct: s.fuelRemainingPct,
             comfort: s.comfort,

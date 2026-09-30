@@ -26,7 +26,7 @@ export interface RunResult {
 export interface RunOptions {
   readonly pilotName?: string
   readonly dailyNumber?: number
-  /** Stop after this many sim seconds (default: 1.5 × the score reference time). */
+  /** Stop after this many sim seconds (default: 1.5 × cruise time, or 1.35 × the best-range time if longer). */
   readonly maxTimeS?: number
 }
 
@@ -34,7 +34,8 @@ export function runFlight(spec: AircraftSpec, route: Route, weather: WeatherFiel
   const tracker = createScoreTracker(spec, route)
   const recorder = createGhostRecorder({ pilot: opts.pilotName ?? 'bot', dailyNumber: opts.dailyNumber ?? 0, routeId: route.id, aircraftId: spec.id })
   const sample: MutableWeatherSample = { wind: { x: 0, y: 0, z: 0 }, turbulence: 0, dominant: null, cloud: 0 }
-  const maxTime = opts.maxTimeS ?? 1.5 * scoreReference(spec, route).timeS
+  const ref = scoreReference(spec, route)
+  const maxTime = opts.maxTimeS ?? Math.max(1.5 * ref.timeS, 1.35 * ref.ecoTimeS)
   const maxSteps = Math.ceil(maxTime / SIM_DT)
 
   let state = flightModel.initialState(spec, route, weather)

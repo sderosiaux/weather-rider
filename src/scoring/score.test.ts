@@ -117,12 +117,16 @@ describe('weather utilization', () => {
 })
 
 describe('board normalization across routes', () => {
-  /** Straight line at cruise speed with the reference throttle: the reference flight. */
-  function referenceFlight(lengthM: number) {
+  /**
+   * The blind reference flights the boards are normalised on: straight line in still air at the full-throttle
+   * airspeed (speed board) or at the best-range airspeed with its fuel flow (eco board), no cabin motion.
+   */
+  function referenceFlight(lengthM: number, board: 'speed' | 'eco') {
     const route: Route = { ...fixtureRoute, id: `r${lengthM}`, gate: v3(lengthM, 3000, 0) }
     const ref = scoreReference(fixtureAircraft, route)
-    const burnPerS = ref.fuelKg / ref.timeS
-    const v = fixtureAircraft.cruiseSpeedMs
+    const timeS = board === 'speed' ? ref.speedTimeS : ref.ecoTimeS
+    const burnPerS = ref.ecoFuelKg / ref.ecoTimeS
+    const v = lengthM / timeS
     return fly(
       (t) => ({
         state: {
@@ -137,18 +141,32 @@ describe('board normalization across routes', () => {
     ).finish()
   }
 
-  it('gives the same boards (~1000) on an 80 km and a 160 km route', () => {
-    const short = referenceFlight(80_000)
-    const long = referenceFlight(160_000)
+  it('gives the same boards (~1000 = the blind reference) on an 80 km and a 160 km route', () => {
+    const short = { speed: referenceFlight(80_000, 'speed'), eco: referenceFlight(80_000, 'eco') }
+    const long = { speed: referenceFlight(160_000, 'speed'), eco: referenceFlight(160_000, 'eco') }
     for (const s of [short, long]) {
-      expect(s.status).toBe('arrived')
-      expect(s.speed).toBeGreaterThanOrEqual(998)
-      expect(s.speed).toBeLessThanOrEqual(1000)
-      expect(s.eco).toBeGreaterThanOrEqual(998)
-      expect(s.eco).toBeLessThanOrEqual(1001)
-      expect(s.smooth).toBe(1000)
+      expect(s.speed.status).toBe('arrived')
+      expect(s.speed.speed).toBeGreaterThanOrEqual(997)
+      expect(s.speed.speed).toBeLessThanOrEqual(1000)
+      expect(s.eco.eco).toBeGreaterThanOrEqual(997)
+      expect(s.eco.eco).toBeLessThanOrEqual(1001)
+      // No cabin motion at all beats the trimmed reference, which rides the route's background air.
+      expect(s.speed.smooth).toBeGreaterThan(1000)
     }
-    expect(Math.abs(short.speed - long.speed)).toBeLessThanOrEqual(1)
+    expect(Math.abs(short.speed.speed - long.speed.speed)).toBeLessThanOrEqual(2)
+    expect(short.speed.smooth).toBe(long.speed.smooth)
+  })
+
+  it('only the weather lifts a board above 1000: a tailwind speeds up the same straight line', () => {
+    const route: Route = { ...fixtureRoute, id: 'tail', gate: v3(100_000, 3000, 0) }
+    const ref = scoreReference(fixtureAircraft, route)
+    const v = 100_000 / ref.speedTimeS + 40
+    const s = fly(
+      (t) => ({ state: { t, pos: v3(v * t, 3000, 0), vel: v3(v, 0, 0), cabinAccel: 0, stress: 0, status: v * t >= 100_000 ? 'arrived' : 'flying' } }),
+      route,
+      3600,
+    ).finish()
+    expect(s.speed).toBeGreaterThan(1100)
   })
 })
 

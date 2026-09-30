@@ -1,16 +1,17 @@
-import { GRAVITY, SEVERE_TURBULENCE } from '../core/constants'
-import { trimLevel } from '../flight'
+import { GRAVITY, SEA_LEVEL_AIR_DENSITY, SEVERE_TURBULENCE } from '../core/constants'
+import { airDensity, trimLevel } from '../flight'
 import type { AircraftSpec, AircraftState, CreateScoreTracker, FlightScore, Route, TelemetryFrame } from '../core/types'
 
 // ─── Comfort ────────────────────────────────────────────────────────────────
 // discomfort = aRms / ACCEL_REF + jRms / JERK_REF,  comfort = 100 · e^(−discomfort)
-// aRms: RMS of cabin vertical accel. jRms: RMS of d/dt of that accel after a
-// PERCEPTION_TAU low-pass (a raw 60 Hz finite difference would turn sim noise into
-// huge jerk). References are chosen so jerk dominates: a steady 1 m/s² push costs
-// ~40 points, the same RMS as a 2 Hz bump costs ~75.
+// aRms: RMS of cabin vertical accel minus its STEADY_TAU moving average: a steady push (the
+// 1.2 g of a level orbit, a gentle climb in rising air) is felt as weight, not as discomfort.
+// jRms: RMS of d/dt of that accel after a PERCEPTION_TAU low-pass (a raw 60 Hz finite difference
+// would turn sim noise into huge jerk). Jerk dominates: bumps are what spill the coffee.
 const ACCEL_REF = 2 // m/s²
 const JERK_REF = 5 // m/s³
 const PERCEPTION_TAU = 0.1 // s
+const STEADY_TAU = 5 // s
 
 // ─── Weather utilization ────────────────────────────────────────────────────
 // Energy integrated over the flight, in joules:
@@ -25,64 +26,123 @@ const PERCEPTION_TAU = 0.1 // s
 const DRAG_REF_ALT_M = 3000
 /** Thrust ∝ (ρ/ρ0)^THRUST_LAPSE, the same law as flight/aero.ts. */
 const THRUST_LAPSE = 0.9
-const SCALE_HEIGHT_M = 8500
-const lapse = (h: number): number => Math.pow(Math.exp(-Math.max(h, 0) / SCALE_HEIGHT_M), THRUST_LAPSE)
+const lapse = (h: number): number => Math.pow(airDensity(h) / SEA_LEVEL_AIR_DENSITY, THRUST_LAPSE)
 
-// ─── Boards (0 unless status = 'arrived'; ~1000 = reference flight) ─────────
-// T_ref = |gate − start| / cruiseSpeed, F_ref = T_ref · fuelBurnFull · REF_THROTTLE
-// speed  = 1000 · (T_ref / simTime)^lev
-// eco    = 1000 · (F_ref / max(fuelUsed, F_ref / 10))^lev_eco · schedule(simTime / T_ref)
-// smooth = 1000 · e^(−discomfort / ride) · (1 − stress/100) · e^(−SEVERE_K · severeS / T_ref)
-// All three are ratios to a reference derived from the route length and aircraft,
-// so a 80 km and a 160 km route produce comparable numbers.
-//
-// Cross-aircraft fairness (one board is shared by every aircraft on a route; SPEC §6 never pay_more = win):
-// - lev = (cruiseSpeed / V_REF)^SPEED_LEVERAGE. A 60 m/s jet shortens a 115 m/s glider's flight far more, in
-//   ratio, than a 420 m/s airliner's. Raising the ratio to lev scores the ground speed gained in units of a
-//   common speed instead, so neither the slowest airframe (wind leverage) nor the fastest (raw thrust) owns it.
-// - lev_eco = (cruiseSpeed / V_REF)^ECO_LEVERAGE, same idea for fuel: the atmosphere can carry a light glider,
-//   not an airliner, so fuel ratios are compared on a common footing.
-// - ride = (gustSensitivity · cabinDamping / RIDE_REF)^RIDE_NORM: a widebody's cabin is smooth by design, so the smooth
-//   board rates how well you flew *that* airframe, not which one you picked. FlightScore.comfort stays raw.
-// - schedule: the eco board still has a timetable. Flying slow is the obvious way to save fuel; past
-//   ECO_SLACK × T_ref the score halves every ECO_HALF × T_ref, so "fly slow" alone can't win it and the
-//   fuel has to come from the weather.
-const REF_THROTTLE = 0.6
+// ─── Boards (0 unless status = 'arrived') ───────────────────────────────────
+// Every board is normalised per aircraft against the best flight that aircraft can make on this route
+// WITHOUT reading the sky (SPEC §10): 1000 = "flies this aircraft well blind", > 1000 only comes from the
+// weather. The references are analytic (trimLevel at the gate-window middle, still air, straight line),
+// so scoring stays cheap and deterministic, and an 80 km and a 160 km route give comparable numbers.
+//   speed  = 1000 · (T_full / simTime)^lev           T_full = L / V_full (level full-throttle airspeed)
+//   eco    = 1000 · (1 + lev_eco · ln(F_range / fuel)) · timetable(simTime / T_range)
+//            F_range, T_range = fuel and time of the straight line at best-range airspeed V_range
+//   smooth = 1000 · e^(SMOOTH_GAIN · (1 − discomfort / D_ref)) · (1 − stress/100) · e^(−SEVERE_K · severeS / T_cruise)
+//            D_ref = discomfort of a trimmed straight flight through this route's background air
+// The blind flight scores exactly 1000 on every aircraft. What the weather adds is then put on a footing
+// shared by all aircraft (one board per route, SPEC §6 never pay_more = win): the same 90 m/s jet shortens a
+// 130 m/s glider's flight by 40 % and a 480 m/s airliner's by 16 %, so a raw ratio hands the speed board to
+// the slowest airframe. lev = (V_full / V_REF)^SPEED_LEVERAGE turns ln(time ratio) ≈ gained m/s / V into
+// gained m/s / V_REF^p·V^(1−p); eco does the same with V_range; smooth compares discomfort in proportion
+// to the airframe's own ride.
+// Eco is log-scaled: a glider riding lift can burn a tenth of its reference, and a ratio of 10 would
+// dwarf the other boards; ln keeps small gains linear (ratio 1.2 → 1182) and big ones on the same
+// scale as speed and smooth (ratio 3 → 2099). The timetable keeps "circle forever at idle" from winning:
+// full score up to ECO_SLACK × T_range, then it halves every ECO_HALF × T_range.
 const SEVERE_K = 20
+const ECO_SLACK = 1.2
+const ECO_HALF = 0.25
+/** Background discomfort of a trimmed straight flight: (RIDE_BASE + RIDE_SEVERITY · severity) · (gust · cabin)^RIDE_EXP. */
+const RIDE_BASE = 0.25
+const RIDE_SEVERITY = 0.5
+const RIDE_EXP = 0.8
 /** Reference speed (m/s): the game cruise that maps routes to real block times (meta/daily REF_GAME_CRUISE_MS). */
 const V_REF = 80_000 / 360
-const SPEED_LEVERAGE = 0.7
-const ECO_LEVERAGE = 1.2
-const RIDE_NORM = 0.8
-/** gustSensitivity · cabinDamping of the airframe whose smooth board is left as is (between narrow body and wide body). */
-const RIDE_REF = 0.6
-const ECO_SLACK = 1.25
-const ECO_HALF = 0.25
+const SPEED_LEVERAGE = 1.3
+const ECO_LEVERAGE = 0.7
+const SMOOTH_GAIN = 1
 
 export interface ScoreReference {
+  /** Straight line at trimmed cruise speed (s): deadlines, severe-turbulence normalisation. */
   readonly timeS: number
-  readonly fuelKg: number
+  /** Straight line at full throttle (s): the speed board's 1000. */
+  readonly speedTimeS: number
+  /** Exponent on the speed ratio, and the factor on ln(fuel ratio): see "Boards". */
+  readonly speedLeverage: number
+  readonly ecoLeverage: number
+  /** Straight line at best-range airspeed: the eco board's 1000. */
+  readonly ecoFuelKg: number
+  readonly ecoTimeS: number
+  /** Discomfort of a trimmed straight flight on this route (smooth board's 1000). */
+  readonly discomfort: number
 }
+
+/** Altitude the blind references fly: the middle of the gate window. */
+const refAltitude = (route: Route): number => (route.gateMinAlt + route.gateMaxAlt) / 2
+
+/** Fastest level airspeed at full throttle (bisection on trim throttle = 1). */
+function fullThrottleSpeed(spec: AircraftSpec, h: number): number {
+  let lo = spec.cruiseSpeedMs * 0.8
+  let hi = spec.maxSpeedMs * 1.6
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) / 2
+    if (trimLevel(spec, h, mid).throttle > 1) hi = mid
+    else lo = mid
+  }
+  return lo
+}
+
+/** Airspeed with the least fuel per metre (fuel flow ∝ throttle · lapse), and that fuel per metre. */
+function bestRange(spec: AircraftSpec, h: number): { speed: number; kgPerM: number } {
+  const minEas = spec.stallSpeedMs * 1.3
+  const vMin = minEas / Math.sqrt(airDensity(h) / SEA_LEVEL_AIR_DENSITY)
+  let best = { speed: spec.cruiseSpeedMs, kgPerM: Infinity }
+  for (let v = vMin; v <= spec.maxSpeedMs * 1.3; v += 2) {
+    const t = trimLevel(spec, h, v).throttle
+    if (t <= 0 || t > 1) continue
+    const kgPerM = (spec.fuelBurnFullKgS * t * lapse(h)) / v
+    if (kgPerM < best.kgPerM) best = { speed: v, kgPerM }
+  }
+  return best
+}
+
+const cache = new WeakMap<AircraftSpec, Map<string, ScoreReference>>()
 
 export function scoreReference(spec: AircraftSpec, route: Route): ScoreReference {
-  const dx = route.gate.x - route.start.x
-  const dy = route.gate.y - route.start.y
-  const dz = route.gate.z - route.start.z
-  const timeS = Math.sqrt(dx * dx + dy * dy + dz * dz) / spec.cruiseSpeedMs
-  return { timeS, fuelKg: timeS * spec.fuelBurnFullKgS * REF_THROTTLE }
+  const key = `${route.id}:${route.start.x},${route.start.z},${route.gate.x},${route.gate.z},${route.gateMinAlt},${route.gateMaxAlt},${route.severity}`
+  const perSpec = cache.get(spec) ?? new Map<string, ScoreReference>()
+  cache.set(spec, perSpec)
+  const hit = perSpec.get(key)
+  if (hit) return hit
+  const L = Math.hypot(route.gate.x - route.start.x, route.gate.z - route.start.z)
+  const h = refAltitude(route)
+  // A blind eco pilot who knows the aircraft still picks its most economical altitude (≤ 8 km, climb not charged).
+  let range = bestRange(spec, h)
+  for (let alt = h + 1000; alt <= Math.min(8000, spec.serviceCeilingM * 0.8); alt += 1000) {
+    const r = bestRange(spec, alt)
+    if (r.kgPerM < range.kgPerM) range = r
+  }
+  const vFull = fullThrottleSpeed(spec, h)
+  const ref: ScoreReference = {
+    timeS: L / spec.cruiseSpeedMs,
+    speedTimeS: L / vFull,
+    speedLeverage: Math.pow(vFull / V_REF, SPEED_LEVERAGE),
+    ecoLeverage: Math.pow(range.speed / V_REF, ECO_LEVERAGE),
+    ecoFuelKg: L * range.kgPerM,
+    ecoTimeS: L / range.speed,
+    discomfort: (RIDE_BASE + RIDE_SEVERITY * route.severity) * Math.pow(spec.gustSensitivity * spec.cabinDamping, RIDE_EXP),
+  }
+  perSpec.set(key, ref)
+  return ref
 }
 
-/** Eco timetable: 1 up to ECO_SLACK × T_ref, then halves every ECO_HALF × T_ref. */
-const schedule = (timeRatio: number): number => Math.pow(0.5, Math.max(0, timeRatio - ECO_SLACK) / ECO_HALF)
+/** Eco timetable: 1 up to ECO_SLACK × T_range, then halves every ECO_HALF × T_range. */
+const timetable = (timeRatio: number): number => Math.pow(0.5, Math.max(0, timeRatio - ECO_SLACK) / ECO_HALF)
 
 const isTerminal = (s: AircraftState['status']): boolean => s !== 'flying'
 
 export const createScoreTracker: CreateScoreTracker = (spec, route) => {
   const ref = scoreReference(spec, route)
   const dragRef = Math.max(0, trimLevel(spec, DRAG_REF_ALT_M, spec.cruiseSpeedMs).throttle) * spec.maxThrustN * lapse(DRAG_REF_ALT_M)
-  const speedLev = Math.pow(spec.cruiseSpeedMs / V_REF, SPEED_LEVERAGE)
-  const ecoLev = Math.pow(spec.cruiseSpeedMs / V_REF, ECO_LEVERAGE)
-  const ride = Math.pow((spec.gustSensitivity * spec.cabinDamping) / RIDE_REF, RIDE_NORM)
 
   let last: AircraftState | null = null
   let simTime = 0
@@ -90,6 +150,7 @@ export const createScoreTracker: CreateScoreTracker = (spec, route) => {
   let accelSq = 0
   let jerkSq = 0
   let filtered = 0
+  let steady = 0
   let atmJ = 0
   let engJ = 0
 
@@ -98,11 +159,15 @@ export const createScoreTracker: CreateScoreTracker = (spec, route) => {
     const { state, controls, weather, dt } = frame
     const a = state.cabinAccel
 
-    if (last === null) filtered = a
+    if (last === null) {
+      filtered = a
+      steady = a
+    }
     const prevFiltered = filtered
     filtered += (a - filtered) * (dt / (PERCEPTION_TAU + dt))
+    steady += (a - steady) * (dt / (STEADY_TAU + dt))
     const jerk = (filtered - prevFiltered) / dt
-    accelSq += a * a * dt
+    accelSq += (a - steady) * (a - steady) * dt
     jerkSq += jerk * jerk * dt
 
     if (weather.turbulence > SEVERE_TURBULENCE) severeS += dt
@@ -149,10 +214,10 @@ export const createScoreTracker: CreateScoreTracker = (spec, route) => {
       severeTurbulenceS: severeS,
       stress,
       weatherUtilization,
-      smooth: arrived ? Math.round(1000 * Math.exp(-discomfort / ride) * (1 - stress / 100) * Math.exp((-SEVERE_K * severeS) / ref.timeS)) : 0,
-      speed: arrived ? Math.round(1000 * Math.pow(ref.timeS / simTime, speedLev)) : 0,
+      smooth: arrived ? Math.round(1000 * Math.exp(SMOOTH_GAIN * (1 - discomfort / ref.discomfort)) * (1 - stress / 100) * Math.exp((-SEVERE_K * severeS) / ref.timeS)) : 0,
+      speed: arrived ? Math.round(1000 * Math.pow(ref.speedTimeS / simTime, ref.speedLeverage)) : 0,
       eco: arrived
-        ? Math.round(1000 * Math.pow(ref.fuelKg / Math.max(fuelUsedKg, ref.fuelKg / 10), ecoLev) * schedule(simTime / ref.timeS))
+        ? Math.round(Math.max(0, 1000 * (1 + ref.ecoLeverage * Math.log(ref.ecoFuelKg / Math.max(fuelUsedKg, 1e-6)))) * timetable(simTime / ref.ecoTimeS))
         : 0,
     }
   }
