@@ -106,13 +106,14 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
       const card = h(
         'button',
         {
-          class: `wr-upg wr-upg--stock${on ? ' is-on' : ''}`,
+          // A locked aircraft has nothing fitted: Stock is shown as the baseline, not as a choice.
+          class: `wr-upg wr-upg--stock${on && owned ? ' is-on' : ''}`,
           type: 'button',
           'data-key': `stock:${slot}`,
-          'aria-pressed': String(on),
+          'aria-pressed': String(on && owned),
           disabled: !owned,
         },
-        h('span', 'wr-upg__head', h('span', 'wr-upg__name', 'Stock'), on ? h('span', 'wr-upg__tag', 'Fitted') : null),
+        h('span', 'wr-upg__head', h('span', 'wr-upg__name', 'Stock'), on && owned ? h('span', 'wr-upg__tag', 'Fitted') : null),
         h('span', 'wr-upg__desc', 'As the factory built it. The baseline every upgrade is measured against.'),
       )
       card.addEventListener('click', () => {
