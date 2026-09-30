@@ -110,8 +110,10 @@ export const STORM_REACH = 4.35
 export const STORM_CORE = 0.6
 /** From this severity a storm core sits on the straight start→gate line. */
 const BLOCK_LINE_SEVERITY = 0.6
+/** From this severity (up to BLOCK_LINE_SEVERITY) a storm sits beside the line, its core edge over it. */
+const NEAR_LINE_SEVERITY = 0.35
 /** Below this severity every storm core stays clear of the straight line. */
-const CLEAR_LINE_SEVERITY = 0.45
+const CLEAR_LINE_SEVERITY = 0.35
 /** Clearance between the straight line and a storm core edge on calm days (m). */
 const LINE_MARGIN = 3500
 /** Low jet core altitude range (m) and speed multiplier. Tuned by the balance lab (lab/reports/balance-loop.md). */
@@ -277,6 +279,7 @@ export function generateLayout(params: WeatherParams): Layout {
   const nearStorms = sev < 0.1 ? 0 : Math.round(sev * 4 + rs() * 1.5)
   const farStorms = Math.floor(sev * 3 * rs())
   const blockLine = sev >= BLOCK_LINE_SEVERITY
+  const nearLine = !blockLine && sev >= NEAR_LINE_SEVERITY
   const avoidLine = sev < CLEAR_LINE_SEVERITY
   for (let i = 0; i < nearStorms + farStorms; i++) {
     const near = i < nearStorms
@@ -286,6 +289,7 @@ export function generateLayout(params: WeatherParams): Layout {
     const side = () => (rs() < 0.5 ? -1 : 1)
     const pick = (): [number, number] => {
       if (blockLine && i === 0) return onCorridor(0.25 + 0.5 * rs(), (rs() * 2 - 1) * 0.15 * radius)
+      if (nearLine && i === 0) return onCorridor(0.25 + 0.5 * rs(), side() * (0.2 + 0.25 * rs()) * radius)
       if (avoidLine) return onCorridor(near ? 0.12 + (0.76 * (i + rs())) / nearStorms : rs(), side() * (lineClear + rs() * (near ? 9000 : 18_000)))
       return near ? onCorridor(0.12 + (0.76 * (i + rs())) / nearStorms, (rs() * 2 - 1) * 14_000) : anywhere(rs)
     }

@@ -51,13 +51,13 @@ const lapse = (h: number): number => Math.pow(airDensity(h) / SEA_LEVEL_AIR_DENS
 const SEVERE_K = 20
 const ECO_SLACK = 1.2
 const ECO_HALF = 0.25
-/** Background discomfort of a trimmed straight flight: (RIDE_BASE + RIDE_SEVERITY · severity) · (gust · cabin)^RIDE_EXP. */
-const RIDE_BASE = 0.25
-const RIDE_SEVERITY = 0.5
+/** Background discomfort of a trimmed straight flight: (RIDE_BASE + RIDE_SEVERITY · severity) · (gust · cabin)^RIDE_EXP (fitted on the lab's direct flights). */
+const RIDE_BASE = 0
+const RIDE_SEVERITY = 0.82
 const RIDE_EXP = 0.8
 /** Reference speed (m/s): the game cruise that maps routes to real block times (meta/daily REF_GAME_CRUISE_MS). */
 const V_REF = 80_000 / 360
-const SPEED_LEVERAGE = 1.3
+const SPEED_LEVERAGE = 1.2
 const ECO_LEVERAGE = 0.7
 const SMOOTH_GAIN = 1
 
