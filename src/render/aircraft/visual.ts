@@ -160,10 +160,10 @@ export function createAircraftVisual(atmosphere: AtmosphereUniforms, glow: THREE
     },
     setOpacity(opacity) {
       const o = Math.min(1, Math.max(0, opacity))
+      // Depth writes stay on while fading: the airframe's own inner faces must not show through.
       for (const m of [material, bladeMat]) {
         m.opacity = o
         m.transparent = o < 0.999
-        m.depthWrite = o >= 0.999
       }
       propDiscMat.opacity = 0.1 * o
       navMat.opacity = strobeMat.opacity = o
