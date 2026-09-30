@@ -1,5 +1,6 @@
 import type { CreateScreens, Screens } from '../../core/presentation'
 import { h } from '../dom'
+import { renderBoards } from './boards'
 import { renderHangar, type HangarMemory } from './hangar'
 import { renderResults } from './results'
 import { renderSettings } from './settings'
@@ -14,6 +15,8 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
   // Selections survive screen changes (title → hangar → title keeps your route and aircraft).
   const titleMemory: TitleMemory = { routeId: null, aircraftId: null, ghostCode: '' }
   const hangarMemory: HangarMemory = { aircraftId: null }
+  const TITLE_FOCUS = '.wr-btn--primary'
+  let titleFocus = TITLE_FOCUS
 
   let onEscape: (() => void) | null = null
   const onKey = (e: KeyboardEvent): void => {
@@ -50,7 +53,7 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
 
   return {
     showTitle(daily, progress, aircraft, unlockHints, cb) {
-      mount(renderTitle(daily, progress, aircraft, unlockHints, cb, titleMemory), '.wr-btn--primary', null)
+      mount(renderTitle(daily, progress, aircraft, unlockHints, cb, titleMemory), titleFocus, null)
     },
     showResults(model, cb) {
       mount(renderResults(model, cb), '.wr-actions .wr-btn--primary', cb.onMenu)
@@ -58,8 +61,31 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
     showHangar(model, cb) {
       mount(renderHangar(model, cb, hangarMemory), '.wr-pick[aria-pressed="true"]', cb.onBack)
     },
+    showBoards(model, cb) {
+      // Empty-state shortcuts: onBack leads to the title, which then opens with the route picked or the link field focused.
+      const toTitle = (focus: string): void => {
+        titleFocus = focus
+        cb.onBack()
+        titleFocus = TITLE_FOCUS
+      }
+      const boards = renderBoards(
+        model,
+        {
+          onRace: (entry) => cb.onRace(entry),
+          onBack: () => cb.onBack(),
+          onChooseRoute: (routeId) => {
+            titleMemory.routeId = routeId
+            toTitle(TITLE_FOCUS)
+          },
+          onPasteLink: () => toTitle('#wr-ghost'),
+        },
+        titleMemory.routeId,
+      )
+      mount(boards, '.wr-lb__tab[aria-selected="true"]', cb.onBack)
+    },
     showSettings(settings, cb) {
-      mount(renderSettings(settings, cb), '.wr-setting input', cb.onBack)
+      // Not the pilot-name field: focusing a text field on open pops the on-screen keyboard on tablets.
+      mount(renderSettings(settings, cb), '.wr-switch__input', cb.onBack)
     },
     dispose() {
       window.removeEventListener('keydown', onKey)

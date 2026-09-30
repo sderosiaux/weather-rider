@@ -1,13 +1,24 @@
-import { DEFAULT_SETTINGS, type Settings } from '../../core/presentation'
+import type { Settings } from '../../core/presentation'
 import { h } from '../dom'
-import { levelFromPercent, percent, sameSettings, withLevel, withSwitch, type LevelKey, type SwitchKey } from './settingsModel'
+import { PILOT_NAME_MAX } from './pilotName'
+import {
+  levelFromPercent,
+  percent,
+  restoreDefaults,
+  sameSettings,
+  withLevel,
+  withPilotName,
+  withSwitch,
+  type LevelKey,
+  type SwitchKey,
+} from './settingsModel'
 
 export interface SettingsCallbacks {
   onChange(settings: Settings): void
   onBack(): void
 }
 
-/** Every edit applies immediately; the live sky behind the panel is the preview. */
+/** Every edit applies immediately (the live sky behind the panel is the preview); the name applies when you leave the field or press Enter. */
 export const renderSettings = (initial: Settings, cb: SettingsCallbacks): HTMLElement => {
   let current = initial
   const syncers: (() => void)[] = []
@@ -56,8 +67,61 @@ export const renderSettings = (initial: Settings, cb: SettingsCallbacks): HTMLEl
     )
   }
 
+  const pilotName = (): HTMLElement => {
+    const id = 'wr-set-pilotName'
+    const input = h('input', {
+      class: 'wr-field__input',
+      type: 'text',
+      id,
+      maxlength: PILOT_NAME_MAX,
+      autocomplete: 'nickname',
+      spellcheck: 'false',
+      enterkeyhint: 'done',
+      'aria-describedby': `${id}-help`,
+      'data-key': id,
+    })
+    const status = h('span', { class: 'wr-name__status', role: 'status', 'aria-live': 'polite' })
+    const say = (text: string, state: 'ok' | 'warn' | ''): void => {
+      status.textContent = text
+      status.dataset.state = state
+    }
+    syncers.push(() => {
+      input.value = current.pilotName
+    })
+    // Commit on Enter or leaving the field (change), never per keystroke: the name is stamped into ghosts.
+    const commitName = (): void => {
+      const next = withPilotName(current, input.value)
+      if (!next) {
+        input.value = current.pilotName
+        say('Can’t be empty', 'warn')
+      } else if (next.pilotName === current.pilotName) {
+        input.value = current.pilotName
+      } else {
+        commit(next)
+        say('Saved', 'ok')
+      }
+    }
+    input.addEventListener('change', commitName)
+    input.addEventListener('input', () => say('', ''))
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') commitName()
+      // First Esc undoes an unsaved edit; the next one closes Settings as usual.
+      if (e.key === 'Escape' && input.value !== current.pilotName) {
+        e.stopPropagation()
+        input.value = current.pilotName
+      }
+    })
+    return h(
+      'div',
+      'wr-name wr-setting',
+      h('div', 'wr-name__head', h('label', { for: id }, 'Pilot name'), status),
+      input,
+      h('p', { class: 'wr-name__help', id: `${id}-help` }, 'Shown on your shared ghosts and on today’s boards.'),
+    )
+  }
+
   const reset = h('button', { class: 'wr-btn wr-btn--quiet wr-btn--sm', type: 'button' }, 'Restore defaults')
-  reset.addEventListener('click', () => commit(DEFAULT_SETTINGS))
+  reset.addEventListener('click', () => commit(restoreDefaults(current)))
   const back = h('button', { class: 'wr-btn wr-btn--primary', type: 'button' }, 'Done')
   back.addEventListener('click', () => cb.onBack())
 
@@ -68,6 +132,7 @@ export const renderSettings = (initial: Settings, cb: SettingsCallbacks): HTMLEl
       'div',
       'wr-sheet wr-settings__panel',
       h('h1', 'wr-settings__title', 'Settings'),
+      pilotName(),
       h('h2', 'wr-sheet__title', 'Flying'),
       toggle('invertPitch', 'Invert pitch', 'Pull back (mouse down, S, stick back) to climb, like a real yoke. Off: push toward the top of the screen to climb.'),
       toggle('coaching', 'Coaching', 'Short in-flight tips on reading the sky. Each one retires once you’ve shown you know it.'),

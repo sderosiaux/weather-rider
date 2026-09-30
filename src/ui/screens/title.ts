@@ -13,6 +13,11 @@ export interface TitleMemory {
 
 const SEVERITY_TEXT = { calm: 'Calm', moderate: 'Moderate', extreme: 'Extreme' } as const
 
+export const severityChip = (severity: number): HTMLElement => {
+  const sev = severityBucket(severity)
+  return h('span', 'wr-chip wr-chip--' + sev, SEVERITY_TEXT[sev])
+}
+
 const liveryFill = (progress: PlayerProgress, id: string): string => progress.livery[id] ?? 'var(--wr-livery-1)'
 
 const kbd = (...keys: string[]): HTMLElement[] => keys.map((k) => h('kbd', {}, k))
@@ -106,7 +111,7 @@ export const renderTitle = (
       { class: `wr-route wr-route--${sev}`, type: 'button', 'aria-pressed': 'false' },
       h('span', 'wr-route__label', r.label),
       h('span', 'wr-route__meta', `${groupThousands(r.realDistanceKm)} km`),
-      h('span', 'wr-chip wr-chip--' + sev, SEVERITY_TEXT[sev]),
+      severityChip(r.severity),
     )
     btn.addEventListener('click', () => {
       route = r
@@ -167,6 +172,8 @@ export const renderTitle = (
   hangarBtn.addEventListener('click', () => cb.onHangar())
   const settingsBtn = h('button', { class: 'wr-link', type: 'button' }, 'Settings')
   settingsBtn.addEventListener('click', () => cb.onSettings())
+  const boardsBtn = h('button', { class: 'wr-link', type: 'button' }, 'Today’s boards')
+  boardsBtn.addEventListener('click', () => cb.onBoards())
 
   const screen = h(
     'section',
@@ -178,7 +185,7 @@ export const renderTitle = (
       h('h1', 'wr-title__name', 'WEATHER RIDER'),
       h('p', 'wr-title__tagline', '« Turbulence isn’t the enemy. It’s the terrain. »'),
       intro(progress),
-      h('div', 'wr-title__links', cheatsheet(), settingsBtn),
+      h('div', 'wr-title__links', cheatsheet(), boardsBtn, settingsBtn),
     ),
     h(
       'div',

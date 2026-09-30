@@ -1,5 +1,6 @@
-// Pure edits on Settings: sliders produce clean, bounded values whatever the DOM hands us.
-import type { Settings } from '../../core/presentation'
+// Pure edits on Settings: sliders and the name field produce clean, bounded values whatever the DOM hands us.
+import { DEFAULT_SETTINGS, type Settings } from '../../core/presentation'
+import { pilotNameFrom } from './pilotName'
 
 export type LevelKey = 'volume' | 'flowIntensity'
 export type SwitchKey = 'invertPitch' | 'coaching'
@@ -22,5 +23,18 @@ export const withLevel = (s: Settings, key: LevelKey, v: number): Settings => ({
 
 export const withSwitch = (s: Settings, key: SwitchKey, on: boolean): Settings => ({ ...s, [key]: on })
 
+/** null = nothing printable was typed: the field goes back to the current name. */
+export const withPilotName = (s: Settings, raw: string): Settings | null => {
+  const pilotName = pilotNameFrom(raw)
+  return pilotName.length > 0 ? { ...s, pilotName } : null
+}
+
+/** Preferences go back to defaults; the name is who you are, not a preference, and stays. */
+export const restoreDefaults = (s: Settings): Settings => ({ ...DEFAULT_SETTINGS, pilotName: s.pilotName })
+
 export const sameSettings = (a: Settings, b: Settings): boolean =>
-  a.invertPitch === b.invertPitch && a.coaching === b.coaching && a.volume === b.volume && a.flowIntensity === b.flowIntensity
+  a.invertPitch === b.invertPitch &&
+  a.coaching === b.coaching &&
+  a.volume === b.volume &&
+  a.flowIntensity === b.flowIntensity &&
+  a.pilotName === b.pilotName

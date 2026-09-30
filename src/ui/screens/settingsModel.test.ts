@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from '../../core/presentation'
-import { clampLevel, levelFromPercent, percent, sameSettings, withLevel, withSwitch } from './settingsModel'
+import { clampLevel, levelFromPercent, percent, restoreDefaults, sameSettings, withLevel, withPilotName, withSwitch } from './settingsModel'
 
 describe('settings edits', () => {
   it('clamps and snaps levels to 5% steps', () => {
@@ -33,5 +33,18 @@ describe('settings edits', () => {
   it('compares settings by value', () => {
     expect(sameSettings(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS })).toBe(true)
     expect(sameSettings(DEFAULT_SETTINGS, withSwitch(DEFAULT_SETTINGS, 'coaching', false))).toBe(false)
+    expect(sameSettings(DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, pilotName: 'Ada' })).toBe(false)
+  })
+
+  it('commits a typed pilot name cleaned, and refuses an empty one', () => {
+    expect(withPilotName(DEFAULT_SETTINGS, '  Ada   Lovelace ')).toEqual({ ...DEFAULT_SETTINGS, pilotName: 'Ada Lovelace' })
+    expect(withPilotName(DEFAULT_SETTINGS, 'A'.repeat(30))!.pilotName).toBe('A'.repeat(20))
+    expect(withPilotName(DEFAULT_SETTINGS, '   ')).toBeNull()
+    expect(withPilotName(DEFAULT_SETTINGS, '\u200B\u202E')).toBeNull()
+  })
+
+  it('restores preferences but keeps the pilot name', () => {
+    const mine = { invertPitch: true, volume: 0.2, flowIntensity: 0.3, coaching: false, pilotName: 'Ada' }
+    expect(restoreDefaults(mine)).toEqual({ ...DEFAULT_SETTINGS, pilotName: 'Ada' })
   })
 })

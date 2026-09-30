@@ -13,7 +13,8 @@
 }
 .wr-screens[data-screen='title'],
 .wr-screens[data-screen='settings'],
-.wr-screens[data-screen='hangar'] {
+.wr-screens[data-screen='hangar'],
+.wr-screens[data-screen='boards'] {
   /* The live demo flight behind the title is the pitch: no wash, no blur. */
   background: none;
   -webkit-backdrop-filter: none;
@@ -38,10 +39,10 @@
 }
 
 /* Zero-specificity resets so component classes always win. */
-:where(.wr-screen) :where(h1, h2, h3, p, ul, dl, dd) {
+:where(.wr-screen) :where(h1, h2, h3, p, ul, ol, dl, dd) {
   margin: 0;
 }
-:where(.wr-screen) :where(ul) {
+:where(.wr-screen) :where(ul, ol) {
   padding: 0;
   list-style: none;
 }
@@ -156,6 +157,16 @@
   margin-top: var(--wr-space-2);
   font-size: var(--wr-text-xs);
   color: var(--wr-ink-faint);
+}
+
+/* Read by screen readers, not drawn. */
+.wr-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* Silhouettes */
@@ -494,7 +505,8 @@
 .wr-setting {
   margin-bottom: var(--wr-space-4);
 }
-.wr-level__head {
+.wr-level__head,
+.wr-name__head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -505,11 +517,24 @@
   color: var(--wr-ink-soft);
   font-weight: var(--wr-weight-medium);
 }
-.wr-level__help {
+.wr-level__help,
+.wr-name__help {
   font-size: var(--wr-text-xs);
   color: var(--wr-ink-faint);
   margin-top: var(--wr-space-1);
 }
+.wr-name {
+  margin-top: var(--wr-space-4);
+}
+.wr-name__head {
+  margin-bottom: var(--wr-space-2);
+}
+.wr-name__status {
+  font-size: var(--wr-text-xs);
+  font-weight: var(--wr-weight-medium);
+}
+.wr-name__status[data-state='ok'] { color: var(--wr-calm); }
+.wr-name__status[data-state='warn'] { color: var(--wr-caution); }
 .wr-level__range {
   --wr-level: 50%;
   appearance: none;
@@ -732,6 +757,221 @@
 }
 .wr-results .wr-actions {
   margin-top: var(--wr-space-2);
+}
+
+/* ── Today's boards ────────────────────────── */
+/* Top-aligned: another route means another list length, and a re-centred sheet would jump. */
+.wr-lb {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+}
+.wr-lb__sheet {
+  width: min(1080px, 100%);
+  box-sizing: border-box;
+}
+.wr-lb__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--wr-space-4);
+}
+.wr-lb__daily {
+  font-size: var(--wr-text-xs);
+  font-weight: var(--wr-weight-strong);
+  letter-spacing: var(--wr-tracking-wide);
+  color: var(--wr-ink-soft);
+}
+.wr-lb__title {
+  font-family: var(--wr-font-display);
+  font-size: var(--wr-text-xl);
+  font-weight: var(--wr-weight-light);
+  margin-top: var(--wr-space-1);
+}
+
+.wr-lb__tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--wr-space-2);
+  margin-top: var(--wr-space-5);
+}
+.wr-lb__tab {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px var(--wr-space-3);
+  padding: 12px 16px;
+  border-radius: var(--wr-radius-md);
+  border: 1px solid var(--wr-hairline);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color var(--wr-fast) var(--wr-ease), background-color var(--wr-fast) var(--wr-ease), box-shadow var(--wr-fast) var(--wr-ease);
+}
+.wr-lb__tab:hover {
+  background: var(--wr-surface);
+}
+.wr-lb__tab[aria-selected='true'] {
+  background: var(--wr-surface);
+  border-color: var(--wr-ink);
+  box-shadow: inset 0 0 0 1px var(--wr-ink);
+}
+.wr-lb__tab-label {
+  font-size: var(--wr-text-lg);
+  font-weight: var(--wr-weight-medium);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wr-lb__tab-runs {
+  grid-column: 1 / -1;
+  font-size: var(--wr-text-xs);
+  color: var(--wr-ink-faint);
+}
+
+.wr-lb__boards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--wr-space-6);
+  margin-top: var(--wr-space-6);
+}
+.wr-lb__board-name {
+  font-size: var(--wr-text-md);
+  font-weight: var(--wr-weight-strong);
+}
+.wr-lb__blurb {
+  font-size: var(--wr-text-xs);
+  color: var(--wr-ink-faint);
+  margin-top: 2px;
+}
+.wr-lb__rows {
+  margin-top: var(--wr-space-3);
+  border-top: 1px solid var(--wr-hairline);
+}
+.wr-lb__row {
+  display: grid;
+  grid-template-columns: 2ch minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: var(--wr-space-3);
+  min-height: 44px;
+  padding: 0 var(--wr-space-2);
+  border-bottom: 1px solid var(--wr-hairline);
+}
+.wr-lb__rank {
+  font-size: var(--wr-text-sm);
+  color: var(--wr-ink-faint);
+  text-align: right;
+}
+.wr-lb__who {
+  display: flex;
+  align-items: center;
+  gap: var(--wr-space-2);
+  min-width: 0;
+}
+/* Names come from other players' ghosts: one line, clipped (long names, stacked accents). The <bdi> keeps a right-to-left name from reordering the row. */
+.wr-lb__pilot {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--wr-text-md);
+  font-weight: var(--wr-weight-medium);
+}
+.wr-lb__you {
+  flex: none;
+  font-size: var(--wr-text-2xs);
+  font-weight: var(--wr-weight-strong);
+  color: var(--wr-action-ink);
+  background: var(--wr-action);
+  padding: 2px 8px;
+  border-radius: var(--wr-radius-pill);
+}
+.wr-lb__score {
+  font-family: var(--wr-font-display);
+  font-size: var(--wr-text-lg);
+  font-weight: var(--wr-weight-light);
+  text-align: right;
+}
+.wr-lb__row.is-lead .wr-lb__score {
+  font-size: var(--wr-text-xl);
+  font-weight: var(--wr-weight-thin);
+  line-height: 1.1;
+}
+.wr-lb__row.is-you {
+  background: var(--wr-surface);
+  box-shadow: inset 2px 0 0 var(--wr-ink);
+}
+.wr-lb__row.is-you .wr-lb__pilot {
+  font-weight: var(--wr-weight-strong);
+}
+.wr-lb__race {
+  position: relative;
+  appearance: none;
+  font: inherit;
+  font-size: var(--wr-text-xs);
+  font-weight: var(--wr-weight-strong);
+  color: var(--wr-ink-soft);
+  background: transparent;
+  border: 1px solid var(--wr-hairline-strong);
+  border-radius: var(--wr-radius-pill);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background-color var(--wr-fast) var(--wr-ease), color var(--wr-fast) var(--wr-ease), border-color var(--wr-fast) var(--wr-ease);
+}
+/* A 44px touch target around the small pill. */
+.wr-lb__race::after {
+  content: '';
+  position: absolute;
+  inset: -8px -4px;
+}
+.wr-lb__row:hover .wr-lb__race {
+  color: var(--wr-ink);
+  border-color: var(--wr-ink-faint);
+}
+/* Same specificity as the row hover above, and later: the button's own state wins. */
+.wr-lb__row .wr-lb__race:hover,
+.wr-lb__row .wr-lb__race:focus-visible {
+  color: var(--wr-action-ink);
+  background: var(--wr-action);
+  border-color: var(--wr-action);
+}
+.wr-lb__none {
+  margin-top: var(--wr-space-3);
+  padding: var(--wr-space-4) 0;
+  border-top: 1px solid var(--wr-hairline);
+  font-size: var(--wr-text-sm);
+  color: var(--wr-ink-faint);
+}
+
+.wr-lb__empty {
+  margin-top: var(--wr-space-6);
+  padding: var(--wr-space-6);
+  border-radius: var(--wr-radius-md);
+  background: var(--wr-surface-sunk);
+  font-size: var(--wr-text-md);
+  line-height: 1.5;
+  color: var(--wr-ink-soft);
+}
+.wr-lb__empty-title {
+  font-size: var(--wr-text-lg);
+  font-weight: var(--wr-weight-medium);
+  color: var(--wr-ink);
+  margin-bottom: var(--wr-space-2);
+}
+.wr-lb__empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wr-space-3);
+  margin-top: var(--wr-space-5);
+}
+.wr-lb__local {
+  margin-top: var(--wr-space-5);
+  font-size: var(--wr-text-xs);
+  color: var(--wr-ink-faint);
 }
 
 /* ── Hangar ────────────────────────────────── */
@@ -1082,8 +1322,16 @@
 @media (max-width: 980px) {
   .wr-title { grid-template-columns: 1fr; align-items: start; }
 }
+@media (max-width: 860px) {
+  .wr-lb__boards { grid-template-columns: 1fr; gap: var(--wr-space-5); }
+  /* Narrow tabs: the route label keeps its own line, the severity goes under it. */
+  .wr-lb__tab { grid-template-columns: auto minmax(0, 1fr); }
+  .wr-lb__tab-label { grid-column: 1 / -1; }
+  .wr-lb__tab-runs { grid-column: auto; }
+}
 @media (max-width: 640px) {
   .wr-boards { grid-template-columns: 1fr; }
+  .wr-lb__tabs { grid-template-columns: 1fr; }
   .wr-results__hero { grid-template-columns: 1fr; }
   .wr-slot { grid-template-columns: 1fr; }
   .wr-sheet { padding: var(--wr-space-5); }

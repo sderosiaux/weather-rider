@@ -1,8 +1,8 @@
 // UI sandbox: HUD over bright / storm skies, every screen with realistic sample data.
-// Deterministic shots: ?screen=hud|title|title-first|results|results-crash|hangar  &bg=bright|storm  &hud=cruise|jet|stall|rough
+// Deterministic shots: ?screen=hud|title|title-first|results|results-crash|hangar|settings|boards|boards-empty  &bg=bright|storm  &hud=cruise|jet|stall|rough
 import { createHud, createInput, createScreens } from '../src/ui'
-import type { AircraftSpec, DailyWeather, HudModel, PlayerProgress, Route, Upgrade, WeatherFeatureKind } from '../src/core/types'
-import { DEFAULT_SETTINGS, type ResultsModel, type Settings } from '../src/core/presentation'
+import type { AircraftSpec, DailyWeather, HudModel, LeaderboardEntry, PlayerProgress, Route, Upgrade, WeatherFeatureKind } from '../src/core/types'
+import { DEFAULT_SETTINGS, type BoardKind, type BoardsModel, type ResultsModel, type Settings } from '../src/core/presentation'
 import { v3 } from '../src/core/math'
 
 const params = new URLSearchParams(location.search)
@@ -34,6 +34,7 @@ const daily: DailyWeather = {
   number: 272,
   seed: 272_2026,
   routes: [route('jfk-lis', 'JFK', 'LIS', 5420, 0.55), route('sfo-hnl', 'SFO', 'HNL', 3860, 0.18), route('dxb-sin', 'DXB', 'SIN', 5840, 0.86)],
+  sky: { sunElevationDeg: 22, sunAzimuthDeg: 125, haze: 0.35, warmth: 0.3 },
   boundsMin: v3(-10_000, 0, -40_000),
   boundsMax: v3(170_000, 14_000, 40_000),
 }
@@ -113,6 +114,48 @@ const SAMPLE_HINTS: Record<string, string> = {
 const hintsFor = (p: PlayerProgress): Record<string, string> =>
   Object.fromEntries(Object.entries(SAMPLE_HINTS).filter(([id]) => !p.unlockedAircraft.includes(id)))
 
+// Today's boards as the store hands them over: one run = one ghost on up to three boards (only scores > 0),
+// best first, ten per board. Friends' names arrive raw from their ghost codes, hostile ones included.
+interface SampleRun {
+  readonly pilot: string
+  readonly routeId: string
+  readonly smooth: number
+  readonly speed: number
+  readonly eco: number
+}
+const RUNS: readonly SampleRun[] = [
+  { pilot: 'Ada', routeId: 'jfk-lis', smooth: 812, speed: 540, eco: 903 },
+  { pilot: 'Zoë ✈', routeId: 'jfk-lis', smooth: 812, speed: 1103, eco: 780 },
+  { pilot: '<img src=x onerror=alert(1)>', routeId: 'jfk-lis', smooth: 455, speed: 1042, eco: 390 },
+  { pilot: 'Captain Maximilian Alexander von Stratosphere-Cumulonimbus 3', routeId: 'jfk-lis', smooth: 598, speed: 611, eco: 655 },
+  { pilot: 'Ada', routeId: 'jfk-lis', smooth: 640, speed: 702, eco: 611 },
+  { pilot: 'مسافر الريح', routeId: 'jfk-lis', smooth: 377, speed: 488, eco: 702 },
+  { pilot: '\u202Eyrollam', routeId: 'jfk-lis', smooth: 301, speed: 655, eco: 0 },
+  { pilot: 'Ada\u200B', routeId: 'jfk-lis', smooth: 720, speed: 590, eco: 540 },
+  { pilot: 'Z' + '\u0336\u0322\u031B\u0316\u0353\u0308\u0300\u0301'.repeat(4) + 'algo', routeId: 'jfk-lis', smooth: 250, speed: 300, eco: 280 },
+  { pilot: 'Marco', routeId: 'jfk-lis', smooth: 700, speed: 655, eco: 598 },
+  { pilot: 'Priya', routeId: 'jfk-lis', smooth: 690, speed: 760, eco: 820 },
+  { pilot: 'Ada', routeId: 'dxb-sin', smooth: 310, speed: 1180, eco: 0 },
+  { pilot: 'Kenji', routeId: 'dxb-sin', smooth: 205, speed: 1255, eco: 0 },
+]
+const BOARD_KINDS: readonly BoardKind[] = ['smooth', 'speed', 'eco']
+const sampleBoards = (runs: readonly SampleRun[]): BoardsModel['boards'] =>
+  Object.fromEntries(
+    daily.routes.map((r) => [
+      r.id,
+      Object.fromEntries(
+        BOARD_KINDS.map((board) => [
+          board,
+          runs
+            .map((run, i): LeaderboardEntry => ({ pilot: run.pilot, dailyNumber: daily.number, routeId: run.routeId, board, value: run[board], ghost: `sample-ghost-${i}` }))
+            .filter((e) => e.routeId === r.id && e.value > 0)
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 10),
+        ]),
+      ) as Record<BoardKind, LeaderboardEntry[]>,
+    ]),
+  )
+
 // ── Screens ────────────────────────────────────────────────────────────────
 
 const log = (msg: string): void => console.info(`[ui sandbox] ${msg}`)
@@ -126,6 +169,18 @@ const showTitle = (progress: PlayerProgress): void => {
     },
     onHangar: () => showHangar(),
     onSettings: () => showSettings(),
+    onBoards: () => showBoards(RUNS),
+  })
+}
+const showBoards = (runs: readonly SampleRun[]): void => {
+  hud.setVisible(false)
+  // Highlight follows the Settings name, like the shell: rename yourself and your rows lose the mark.
+  screens.showBoards({ daily, pilot: sandboxSettings.pilotName, boards: sampleBoards(runs) }, {
+    onRace: (e) => {
+      log(`onRace(${e.routeId}/${e.board} #${e.ghost}, value ${e.value})`)
+      showHud()
+    },
+    onBack: () => showTitle(veteran),
   })
 }
 let hangarProgress = veteran
@@ -154,7 +209,7 @@ const showHangar = (): void => {
     onBack: () => showTitle(veteran),
   })
 }
-let sandboxSettings: Settings = DEFAULT_SETTINGS
+let sandboxSettings: Settings = { ...DEFAULT_SETTINGS, pilotName: veteran.pilot }
 const showSettings = (): void => {
   hud.setVisible(false)
   screens.showSettings(sandboxSettings, {
@@ -238,6 +293,8 @@ dev.append(
   btn('Crash', () => showResults('crashed')),
   btn('Hangar', showHangar),
   btn('Settings', showSettings),
+  btn('Boards', () => showBoards(RUNS)),
+  btn('No boards', () => showBoards([])),
   readout,
 )
 
@@ -251,6 +308,8 @@ switch (initial) {
   case 'results-crash': showResults('crashed'); break
   case 'hangar': showHangar(); break
   case 'settings': showSettings(); break
+  case 'boards': showBoards(RUNS); break
+  case 'boards-empty': showBoards([]); break
   default: showHud()
 }
 
