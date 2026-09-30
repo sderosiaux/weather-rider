@@ -3,7 +3,6 @@ import type { AircraftSpec, DailyWeather, PlayerProgress, Route } from '../../co
 import { h } from '../dom'
 import { groupThousands, severityBucket } from '../format'
 import { aircraftSilhouette } from '../silhouette'
-import { loadMemory, saveMemory } from '../coach/store'
 import { boardName } from '../tradeoffs'
 
 export interface TitleMemory {
@@ -18,25 +17,11 @@ const liveryFill = (progress: PlayerProgress, id: string): string => progress.li
 
 const kbd = (...keys: string[]): HTMLElement[] => keys.map((k) => h('kbd', {}, k))
 
-const coachingToggle = (): HTMLElement => {
-  const box = h('input', { type: 'checkbox', class: 'wr-switch__input', id: 'wr-coaching' })
-  box.checked = loadMemory().enabled
-  box.addEventListener('change', () => saveMemory({ ...loadMemory(), enabled: box.checked }))
-  return h(
-    'label',
-    { class: 'wr-switch', for: 'wr-coaching' },
-    box,
-    h('span', 'wr-switch__track', h('span', 'wr-switch__thumb')),
-    h('span', 'wr-switch__text', h('b', {}, 'Coaching'), h('span', {}, 'Short in-flight tips on reading the sky. Each one retires once you’ve shown you know it.')),
-  )
-}
-
 const cheatsheet = (): HTMLElement =>
   h(
     'details',
     'wr-cheats',
     h('summary', {}, 'Controls'),
-    coachingToggle(),
     h(
       'dl',
       'wr-cheats__grid',
@@ -180,6 +165,8 @@ export const renderTitle = (
   })
   const hangarBtn = h('button', { class: 'wr-btn wr-btn--quiet', type: 'button' }, 'Open hangar')
   hangarBtn.addEventListener('click', () => cb.onHangar())
+  const settingsBtn = h('button', { class: 'wr-link', type: 'button' }, 'Settings')
+  settingsBtn.addEventListener('click', () => cb.onSettings())
 
   const screen = h(
     'section',
@@ -191,7 +178,7 @@ export const renderTitle = (
       h('h1', 'wr-title__name', 'WEATHER RIDER'),
       h('p', 'wr-title__tagline', '« Turbulence isn’t the enemy. It’s the terrain. »'),
       intro(progress),
-      cheatsheet(),
+      h('div', 'wr-title__links', cheatsheet(), settingsBtn),
     ),
     h(
       'div',

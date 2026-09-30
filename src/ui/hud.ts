@@ -122,10 +122,11 @@ export const createHud: CreateHud = (root: HTMLElement): Hud => {
 
   let lastDominant: WeatherFeatureKind | null | undefined
 
-  // Coaching reads the same model stream; memory is reloaded per flight so the title toggle applies.
+  // Coaching reads the same model stream. On/off comes from Settings via setCoaching; lessons from local memory.
+  let coachEnabled = true
   const fromMemory = (): CoachState => {
     const mem = loadMemory()
-    return initialCoach(mem.enabled, mem.retired, mem.jetRideS)
+    return initialCoach(coachEnabled, mem.retired, mem.jetRideS)
   }
   let coach = fromMemory()
   const persistCoach = (): void => saveMemory({ ...loadMemory(), retired: coach.retired, jetRideS: coach.jetRideS })
@@ -232,11 +233,16 @@ export const createHud: CreateHud = (root: HTMLElement): Hud => {
     setVisible(visible: boolean): void {
       if (visible && el.classList.contains('is-hidden')) {
         const mem = loadMemory()
-        coach = newFlight({ ...coach, enabled: mem.enabled, retired: mem.retired, jetRideS: mem.jetRideS })
+        coach = newFlight({ ...coach, enabled: coachEnabled, retired: mem.retired, jetRideS: mem.jetRideS })
       }
       if (!visible && !el.classList.contains('is-hidden')) persistCoach()
       if (!visible) w.flag(coachLine, 'is-on', false)
       w.flag(el, 'is-hidden', !visible)
+    },
+    setCoaching(enabled: boolean): void {
+      coachEnabled = enabled
+      coach = { ...coach, enabled, showing: enabled ? coach.showing : null }
+      if (!enabled) w.flag(coachLine, 'is-on', false)
     },
     dispose(): void {
       el.remove()

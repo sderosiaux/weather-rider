@@ -17,6 +17,8 @@ export interface HangarCallbacks {
   onEquip(aircraftId: string, upgradeId: string): void
   onUnequip(aircraftId: string, slot: UpgradeSlot): void
   onLivery(aircraftId: string, color: string): void
+  /** Drives the 3D showcase on the left of the canvas. */
+  onSelectAircraft(aircraftId: string): void
   onBack(): void
 }
 
@@ -57,8 +59,9 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
   let selected: AircraftSpec = initial
   memory.aircraftId = selected.id
 
-  const gallery = h('div', { class: 'wr-gallery', role: 'group', 'aria-label': 'Aircraft' })
+  const gallery = h('div', { class: 'wr-picks', role: 'group', 'aria-label': 'Aircraft' })
   const detail = h('div', 'wr-hangar__detail')
+  const caption = h('div', { class: 'wr-hangar__caption', 'aria-live': 'polite' })
 
   const liveryOf = (id: string): string => progress.livery[id] ?? `var(${LIVERY_VARS[0]})`
   const equippedIds = (id: string): readonly string[] => progress.loadouts[id] ?? []
@@ -70,18 +73,20 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
         const tile = h(
           'button',
           {
-            class: `wr-trophy${locked ? ' is-locked' : ''}`,
+            class: `wr-pick${locked ? ' is-locked' : ''}`,
             type: 'button',
             'data-key': `a:${a.id}`,
             'aria-pressed': String(a.id === selected.id),
+            title: locked ? `${a.name}: ${model.unlockHints[a.id] ?? 'not yet earned'}` : a.name,
           },
-          h('span', 'wr-trophy__plinth', aircraftSilhouette(a.class, liveryOf(a.id))),
-          h('span', 'wr-trophy__name', a.name),
-          h('span', 'wr-trophy__meta', locked ? (model.unlockHints[a.id] ?? 'Not yet earned') : a.class),
+          h('span', 'wr-pick__art', aircraftSilhouette(a.class, liveryOf(a.id))),
+          h('span', 'wr-pick__name', a.name),
         )
         tile.addEventListener('click', () => {
+          if (a.id === selected.id) return
           selected = a
           memory.aircraftId = a.id
+          cb.onSelectAircraft(a.id)
           render()
         })
         return tile
@@ -101,13 +106,14 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
       const card = h(
         'button',
         {
-          class: `wr-upg wr-upg--stock${on ? ' is-on' : ''}`,
+          // A locked aircraft has nothing fitted: Stock is shown as the baseline, not as a choice.
+          class: `wr-upg wr-upg--stock${on && owned ? ' is-on' : ''}`,
           type: 'button',
           'data-key': `stock:${slot}`,
-          'aria-pressed': String(on),
+          'aria-pressed': String(on && owned),
           disabled: !owned,
         },
-        h('span', 'wr-upg__head', h('span', 'wr-upg__name', 'Stock'), on ? h('span', 'wr-upg__tag', 'Fitted') : null),
+        h('span', 'wr-upg__head', h('span', 'wr-upg__name', 'Stock'), on && owned ? h('span', 'wr-upg__tag', 'Fitted') : null),
         h('span', 'wr-upg__desc', 'As the factory built it. The baseline every upgrade is measured against.'),
       )
       card.addEventListener('click', () => {
@@ -182,28 +188,22 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
       return sw
     })
 
+    caption.replaceChildren(
+      h('p', 'wr-hangar__class', owned ? a.class : `${a.class} · not yet earned`),
+      h('h2', 'wr-hangar__name', a.name),
+      owned
+        ? h('div', { class: 'wr-swatches', role: 'group', 'aria-label': 'Livery color' }, swatches)
+        : h('p', 'wr-hangar__earn', model.unlockHints[a.id] ? `To earn it: ${model.unlockHints[a.id]}` : 'Keep flying the daily routes to earn it.'),
+    )
+
     detail.replaceChildren(
       h(
-        'div',
-        'wr-hangar__fit',
-        h('h2', 'wr-sheet__title', owned ? `Fit out the ${a.name}` : `${a.name} is not in your hangar yet`),
-        owned
-          ? null
-          : h(
-              'p',
-              'wr-hangar__locked-note',
-              model.unlockHints[a.id] ? `To earn it: ${model.unlockHints[a.id]}. ` : '',
-              'You can already study its upgrades.',
-            ),
-        slots,
-      ),
-      h(
-        'aside',
+        'section',
         'wr-hangar__sheet',
         h('h2', 'wr-sheet__title', 'Against the stock aircraft'),
         h('p', 'wr-hangar__rule', 'Every upgrade is a tradeoff. It moves a compromise; it never adds raw power.'),
         diff.length === 0
-          ? h('p', 'wr-hangar__empty', 'Stock configuration. Fit an upgrade to see what it gives and what it costs.')
+          ? h('p', 'wr-hangar__empty', 'Stock configuration. Fit an upgrade below to see what it gives and what it costs.')
           : h(
               'table',
               'wr-diff',
@@ -224,8 +224,13 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
               ),
             ),
         h('div', 'wr-legend', h('span', 'wr-legend__benefit', 'gives'), h('span', 'wr-legend__cost', 'costs'), h('span', 'wr-legend__trait', 'changes the feel')),
-        h('h2', 'wr-sheet__title', 'Livery'),
-        h('div', { class: 'wr-swatches', role: 'group', 'aria-label': 'Livery color' }, swatches),
+      ),
+      h(
+        'section',
+        'wr-hangar__fit',
+        h('h2', 'wr-sheet__title', owned ? `Fit out the ${a.name}` : 'Upgrades'),
+        owned ? null : h('p', 'wr-hangar__locked-note', 'You can study its upgrades now and fit them once it’s yours.'),
+        slots,
       ),
     )
   }
@@ -241,13 +246,16 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
   const back = h('button', { class: 'wr-btn wr-btn--quiet', type: 'button' }, 'Back to menu')
   back.addEventListener('click', () => cb.onBack())
 
+  // Left ~60% is the 3D showcase (drawn by the world view): only a title and a caption, no scrim.
   const screen = h(
     'section',
-    { class: 'wr-screen wr-hangar', 'aria-label': 'Hangar' },
+    { class: 'wr-screen wr-hangar', 'aria-label': 'Hangar', 'data-screen': 'hangar' },
     h('header', 'wr-hangar__header', h('h1', 'wr-hangar__title', 'Hangar'), back),
-    gallery,
-    h('div', 'wr-sheet wr-hangar__body', detail),
+    caption,
+    h('aside', { class: 'wr-sheet wr-hangar__panel', 'data-keep-scroll': '', 'data-hangar-panel': '' }, h('h2', 'wr-sheet__title', 'Your aircraft'), gallery, detail),
   )
   render()
+  // Every show (open, or re-show after an equip/livery change) re-frames the showcase with current data.
+  cb.onSelectAircraft(selected.id)
   return screen
 }

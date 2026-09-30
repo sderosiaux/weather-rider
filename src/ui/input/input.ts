@@ -4,6 +4,7 @@ import {
   digitalAxis,
   integrateThrottle,
   mixAxis,
+  orientPitch,
   shapeAxis,
   smoothToward,
   stickFromOffset,
@@ -13,7 +14,7 @@ import { DISARMED, MENU_EVENT, stepStick, type StickState } from './stick'
 import './input.css'
 
 export interface InputOptions {
-  /** Screen-up / W / stick-up = nose down (aviation stick convention). Default false: up = nose up. */
+  /** Initial value; see setInvertPitch. */
   readonly invertPitch?: boolean
   readonly initialThrottle?: number
 }
@@ -51,7 +52,7 @@ const HANDLED = new Set([
 ])
 
 export const createInput = (target: HTMLElement, options: InputOptions = {}): InputSource => {
-  const invertPitch = options.invertPitch ?? false
+  let invertPitch = options.invertPitch ?? false
   const keys = new Set<string>()
 
   let throttle = clamp(options.initialThrottle ?? 0.7, 0, 1)
@@ -148,7 +149,7 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
       const shoulders = btn(5) - btn(4)
       const yaw = Math.abs(triggers) > 0.05 ? triggers : shoulders
       const throttleRate = shapeAxis(-ax(3), PAD_DEADZONE, 0) * PAD_THROTTLE_RATE
-      return { pitch: invertPitch ? -pitchUp : pitchUp, roll, yaw: clamp(yaw, -1, 1), throttleRate }
+      return { pitch: orientPitch(pitchUp, invertPitch), roll, yaw: clamp(yaw, -1, 1), throttleRate }
     }
     return null
   }
@@ -161,7 +162,7 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     if (isTyping()) keys.clear()
 
     // Keyboard
-    const kPitchRaw = digitalAxis(has('KeyS', 'ArrowDown'), has('KeyW', 'ArrowUp')) * (invertPitch ? -1 : 1)
+    const kPitchRaw = orientPitch(digitalAxis(has('KeyS', 'ArrowDown'), has('KeyW', 'ArrowUp')), invertPitch)
     const kRollRaw = digitalAxis(has('KeyA', 'ArrowLeft'), has('KeyD', 'ArrowRight'))
     const kYawRaw = digitalAxis(has('KeyQ'), has('KeyE'))
     smoothed.kPitch = smoothToward(smoothed.kPitch, kPitchRaw, dt, KEY_TAU)
@@ -220,5 +221,10 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     reticle.remove()
   }
 
-  return { read, dispose }
+  // Applies to mouse, keys and gamepad from the next read(); the smoothed axes carry over so nothing jumps.
+  const setInvertPitch = (invert: boolean): void => {
+    invertPitch = invert
+  }
+
+  return { read, setInvertPitch, dispose }
 }
