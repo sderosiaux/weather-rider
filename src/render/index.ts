@@ -4,7 +4,7 @@ import type { AircraftSpec, AircraftState, MutableWeatherSample, Route, WeatherF
 import { createAircraftVisual } from './aircraft/visual'
 import { createAtmosphereUniforms, createSky, PALETTE, SUN_DIR } from './atmosphere'
 import { createChaseCamera, smoothing } from './camera'
-import { DEFAULT_VISIBLE_FRACTION, easeInOut, HANGAR_PANEL_SELECTOR, SHOWCASE_ELEVATION, SHOWCASE_FOV, SHOWCASE_TILT_UP, showcaseFraming, TURNTABLE_RATE, visibleFractionFromRects } from './showcase'
+import { easeInOut, SHOWCASE_ELEVATION, SHOWCASE_FOV, showcaseFraming, TURNTABLE_RATE } from './showcase'
 import { layoutClouds, layoutHorizon } from './clouds/layout'
 import { createCloudPass } from './clouds/composite'
 import { createCloudLayer } from './clouds/mesh'
@@ -117,20 +117,6 @@ export const createWorldView: CreateWorldView = (canvas) => {
   let fade = 1
   let turntable = 0
   let framingRadius = 20
-  let visibleFraction = DEFAULT_VISIBLE_FRACTION
-  let visibleTarget = DEFAULT_VISIBLE_FRACTION
-  let panelProbeT = 0
-  /** Frame in the space the hangar panel leaves free; re-read twice a second (layout reads aren't free). */
-  const probePanel = (dt: number): void => {
-    panelProbeT -= dt
-    if (panelProbeT <= 0) {
-      panelProbeT = 0.5
-      const el = typeof document !== 'undefined' ? document.querySelector(HANGAR_PANEL_SELECTOR) : null
-      const f = visibleFractionFromRects(canvas.getBoundingClientRect(), el?.getBoundingClientRect() ?? null)
-      visibleTarget = f ?? DEFAULT_VISIBLE_FRACTION
-    }
-    visibleFraction += (visibleTarget - visibleFraction) * smoothing(4, dt)
-  }
   let lastState: AircraftState | null = null
   const chaseCam = new THREE.PerspectiveCamera(50, 16 / 9, NEAR, FAR)
   const stage = new THREE.Vector3()
@@ -186,8 +172,7 @@ export const createWorldView: CreateWorldView = (canvas) => {
 
     // Camera: three-quarter, slightly high, the sun behind the camera so the livery is lit.
     const aspect = cssWidth / cssHeight
-    if (showcase) probePanel(dt)
-    const { distance } = showcaseFraming(framingRadius, aspect, SHOWCASE_FOV, visibleFraction)
+    const { distance } = showcaseFraming(framingRadius, aspect, SHOWCASE_FOV)
     const sunYaw = Math.atan2(-SUN_DIR.z, SUN_DIR.x) + 0.6
     camShowPos.set(Math.cos(sunYaw) * Math.cos(SHOWCASE_ELEVATION), Math.sin(SHOWCASE_ELEVATION), -Math.sin(sunYaw) * Math.cos(SHOWCASE_ELEVATION))
     rim.position.copy(stage).addScaledVector(camShowPos, -1).addScaledVector(upY, 0.6)
@@ -195,8 +180,7 @@ export const createWorldView: CreateWorldView = (canvas) => {
     rim.intensity = 2.2 * e
     sun.intensity = 3.2 + 1.3 * e
     camShowPos.multiplyScalar(distance).add(stage)
-    tmpV.copy(stage).addScaledVector(upY, distance * Math.tan(SHOWCASE_TILT_UP))
-    lookM.lookAt(camShowPos, tmpV, upY)
+    lookM.lookAt(camShowPos, stage, upY)
     camShowQ.setFromRotationMatrix(lookM)
 
     if (e > 0) {
@@ -212,8 +196,9 @@ export const createWorldView: CreateWorldView = (canvas) => {
     camera.quaternion.copy(chaseCam.quaternion).slerp(camShowQ, e)
     camera.fov = chaseCam.fov + (SHOWCASE_FOV - chaseCam.fov) * e
     if (e > 0) {
-      const off = showcaseFraming(framingRadius, cssWidth / cssHeight, SHOWCASE_FOV, visibleFraction).offsetFraction * e
-      camera.setViewOffset(cssWidth, cssHeight, off * cssWidth, 0, cssWidth, cssHeight)
+      // Framed from the canvas size alone: the contract's safe box, no knowledge of the hangar DOM.
+      const f = showcaseFraming(framingRadius, cssWidth / cssHeight, SHOWCASE_FOV)
+      camera.setViewOffset(cssWidth, cssHeight, f.offsetX * e * cssWidth, f.offsetY * e * cssHeight, cssWidth, cssHeight)
     } else if (camera.view) {
       camera.clearViewOffset()
     }
