@@ -67,6 +67,21 @@ describe('recordFlight', () => {
     expect(fly(newProgress('Ada'), score('crashed', { smooth: 500 })).entries).toEqual([])
   })
 
+  it('stamps board rows with the display name and leaves the progress identity alone', () => {
+    const p = newProgress('Pilot')
+    const input = { score: score('arrived', { smooth: 500, eco: 300 }), dailyNumber: 272, routeId: 'jfk-lis', aircraftId: 'turboprop', ghostCode: 'GHOST' }
+    const named = recordFlight(p, { ...input, pilot: 'Ada Lovelace' })
+    expect(named.entries.map((e) => e.pilot)).toEqual(['Ada Lovelace', 'Ada Lovelace'])
+    expect(named.progress.pilot).toBe('Pilot')
+    expect(named.progress).toEqual(recordFlight(p, input).progress)
+  })
+
+  it('a missing or blank display name falls back to the progress pilot', () => {
+    const input = { score: score('arrived', { speed: 800 }), dailyNumber: 272, routeId: 'jfk-lis', aircraftId: 'turboprop', ghostCode: 'GHOST' }
+    expect(recordFlight(newProgress('Ada'), input).entries[0]!.pilot).toBe('Ada')
+    expect(recordFlight(newProgress('Ada'), { ...input, pilot: '' }).entries[0]!.pilot).toBe('Ada')
+  })
+
   it('flying blind (boards ≤ 1000) stalls after narrow body: the wide body asks for a smooth ride well above blind', () => {
     const p = flyN(newProgress('Grinder'), 100, score('arrived', { smooth: 700, speed: 700, eco: 700 }))
     expect(p.unlockedAircraft).toEqual(['turboprop', 'regional'])

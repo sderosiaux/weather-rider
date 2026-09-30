@@ -3,6 +3,7 @@ import { clamp, lerp, v3 } from '../core/math'
 import { createRng, hashInts, hashString } from '../core/rng'
 import type { DailyWeather, Route, Vec3, WeatherParams } from '../core/types'
 import { ROUTE_CATALOG, type CatalogRoute } from './routes'
+import { daySky } from './sky'
 
 const DAY_MS = 86_400_000
 const DAILY_SALT = 0x5eed_da17
@@ -85,8 +86,10 @@ export function routeBounds(route: Route): { boundsMin: Vec3; boundsMax: Vec3 } 
   }
 }
 
+const daySeed = (n: number): number => hashInts(n, DAILY_SALT)
+
 export function dailyWeatherFor(n: number): DailyWeather {
-  const seed = hashInts(n, DAILY_SALT)
+  const seed = daySeed(n)
   const rng = createRng(seed)
   // Partial Fisher–Yates: three distinct city pairs.
   const pool = [...ROUTE_CATALOG]
@@ -108,6 +111,7 @@ export function dailyWeatherFor(n: number): DailyWeather {
     number: n,
     seed,
     routes: [calm, moderate, extreme],
+    sky: daySky(n, daySeed),
     boundsMin: v3(Math.min(...boxes.map((b) => b.boundsMin.x)), 0, Math.min(...boxes.map((b) => b.boundsMin.z))),
     boundsMax: v3(Math.max(...boxes.map((b) => b.boundsMax.x)), WORLD_CEILING_M, Math.max(...boxes.map((b) => b.boundsMax.z))),
   }

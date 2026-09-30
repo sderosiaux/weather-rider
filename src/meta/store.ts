@@ -57,8 +57,19 @@ function parse(raw: string | null): SaveFile {
   }
 }
 
-const sameKey = (a: LeaderboardEntry, b: LeaderboardEntry): boolean =>
-  a.dailyNumber === b.dailyNumber && a.routeId === b.routeId && a.board === b.board
+/**
+ * Rows that read the same on a board are one row: racing a friend's ghost again, or landing the same score twice,
+ * adds nothing. The first occurrence wins, so a stored row keeps its ghost and its tie-break rank.
+ */
+function dedupe(entries: readonly LeaderboardEntry[]): LeaderboardEntry[] {
+  const seen = new Set<string>()
+  return entries.filter((e) => {
+    const key = JSON.stringify([e.pilot, e.dailyNumber, e.routeId, e.board, e.value])
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
 
 /** Highest first; on ties the earlier submission (lower index) wins, so re-flying an equal score doesn't steal the spot. */
 const ranked = (entries: readonly LeaderboardEntry[]): LeaderboardEntry[] =>
@@ -132,8 +143,7 @@ export function createStore(storage: Pick<Storage, 'getItem' | 'setItem'>): Meta
     },
     submit(entries) {
       const file = read()
-      const fresh = entries.filter((e) => !file.entries.some((o) => sameKey(o, e) && o.pilot === e.pilot && o.value === e.value && o.ghost === e.ghost))
-      return write({ ...file, entries: prune([...file.entries, ...fresh]) })
+      return write({ ...file, entries: prune(dedupe([...file.entries, ...entries])) })
     },
     localLeaderboard(dailyNumber, routeId, b, limit = 10) {
       return board(dailyNumber, routeId, b).slice(0, limit)

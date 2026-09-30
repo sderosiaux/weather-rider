@@ -61,6 +61,11 @@ export interface FlightRecord {
   readonly routeId: string
   readonly aircraftId: string
   readonly ghostCode: string
+  /**
+   * Display name for the board rows (Settings). Missing or blank → progress.pilot, which stays the save's identity:
+   * renaming yourself relabels future rows, it never forks or moves the progress.
+   */
+  readonly pilot?: string
 }
 
 /**
@@ -96,9 +101,10 @@ export function recordFlight(
     }
   }
 
+  const pilot = input.pilot || progress.pilot
   const entries: LeaderboardEntry[] = arrived
     ? BOARDS.filter((b) => score[b] > 0).map((board) => ({
-        pilot: progress.pilot,
+        pilot,
         dailyNumber: input.dailyNumber,
         routeId: input.routeId,
         board,
