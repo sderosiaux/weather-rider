@@ -735,10 +735,11 @@
 }
 
 /* ── Hangar ────────────────────────────────── */
-/* The left ~60% belongs to the 3D showcase drawn by the world view (WorldView.setShowcase):
-   only a title and a caption live there, no scrim. The panel geometry is shared with render. */
+/* The left of the canvas belongs to the 3D showcase (WorldView.setShowcase). Render frames it from
+   canvas size alone (aircraft in x 5–55%, y 15–78%), so at ≥ 980px this layout promises:
+   panel left edge ≥ 58% of the width, title/back within the top 12%, caption within the bottom 18%. */
 .wr-hangar {
-  --wr-hangar-panel: clamp(440px, 39vw, 580px);
+  --wr-hangar-panel: min(39vw, 580px);
   overflow: hidden;
   padding: 0;
 }
@@ -768,10 +769,10 @@
 .wr-hangar__caption {
   position: absolute;
   left: clamp(20px, 5vw, 72px);
-  bottom: calc(var(--wr-edge) + var(--wr-space-2));
+  bottom: var(--wr-edge);
   max-width: min(560px, calc(100vw - var(--wr-hangar-panel) - 160px));
   display: grid;
-  gap: var(--wr-space-2);
+  gap: var(--wr-space-1);
   text-shadow: var(--wr-title-text-halo);
 }
 .wr-hangar__caption::before {
@@ -794,7 +795,7 @@
 }
 .wr-hangar__name {
   font-family: var(--wr-font-display);
-  font-size: clamp(36px, 4.4vw, 60px);
+  font-size: clamp(28px, min(4vw, 5.2vh), 52px);
   font-weight: var(--wr-weight-thin);
   line-height: 1;
 }
@@ -804,7 +805,11 @@
   color: var(--wr-ink-soft);
 }
 .wr-hangar__caption .wr-swatches {
-  margin-top: var(--wr-space-2);
+  margin-top: var(--wr-space-1);
+}
+.wr-hangar__caption .wr-swatch {
+  width: 26px;
+  height: 26px;
 }
 
 .wr-hangar__panel {
@@ -1069,10 +1074,13 @@
 }
 
 /* ── Responsive ────────────────────────────── */
-@media (max-width: 980px) {
-  .wr-title { grid-template-columns: 1fr; align-items: start; }
+/* Below the showcase contract range (< 980px) the panel takes the screen. */
+@media (max-width: 979px) {
   .wr-hangar { --wr-hangar-panel: min(100vw - 2 * var(--wr-edge), 520px); }
   .wr-hangar__caption { display: none; }
+}
+@media (max-width: 980px) {
+  .wr-title { grid-template-columns: 1fr; align-items: start; }
 }
 @media (max-width: 640px) {
   .wr-boards { grid-template-columns: 1fr; }
