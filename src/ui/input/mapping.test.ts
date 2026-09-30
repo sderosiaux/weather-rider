@@ -5,6 +5,7 @@ import {
   expo,
   integrateThrottle,
   mixAxis,
+  orientPitch,
   shapeAxis,
   smoothToward,
   stickFromOffset,
@@ -109,5 +110,24 @@ describe('mixAxis', () => {
     expect(mixAxis([0.3, -1, 0.4])).toBe(0.3)
     expect(mixAxis([0, 0, 0.4])).toBe(0.4)
     expect(mixAxis([0, 0, 0])).toBe(0)
+  })
+})
+
+describe('pitch inversion', () => {
+  it('default: toward the top of the screen is nose up; inverted: pulling back is nose up', () => {
+    expect(orientPitch(1, false)).toBe(1)
+    expect(orientPitch(1, true)).toBe(-1)
+    expect(orientPitch(-0.4, true)).toBeCloseTo(0.4)
+  })
+  it('keys: W is nose up by default, S is nose up when inverted', () => {
+    const w = digitalAxis(false, true)
+    const s = digitalAxis(true, false)
+    expect(orientPitch(w, false)).toBe(1)
+    expect(orientPitch(s, true)).toBe(1)
+  })
+  it('mouse: pulling the stick down (screen +y) is nose up only when inverted', () => {
+    const shape = { deadzone: 0.05, expo: 0 }
+    expect(stickFromOffset(0, 150, 150, shape, false).pitch).toBeCloseTo(-1)
+    expect(stickFromOffset(0, 150, 150, shape, true).pitch).toBeCloseTo(1)
   })
 })

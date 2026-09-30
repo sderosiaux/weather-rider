@@ -2,7 +2,7 @@
 // Deterministic shots: ?screen=hud|title|title-first|results|results-crash|hangar  &bg=bright|storm  &hud=cruise|jet|stall|rough
 import { createHud, createInput, createScreens } from '../src/ui'
 import type { AircraftSpec, DailyWeather, HudModel, PlayerProgress, Route, Upgrade, WeatherFeatureKind } from '../src/core/types'
-import type { ResultsModel } from '../src/core/presentation'
+import { DEFAULT_SETTINGS, type ResultsModel, type Settings } from '../src/core/presentation'
 import { v3 } from '../src/core/math'
 
 const params = new URLSearchParams(location.search)
@@ -125,6 +125,7 @@ const showTitle = (progress: PlayerProgress): void => {
       showHud()
     },
     onHangar: () => showHangar(),
+    onSettings: () => showSettings(),
   })
 }
 let hangarProgress = veteran
@@ -148,6 +149,20 @@ const showHangar = (): void => {
       log(`onLivery(${a}, ${c})`)
       hangarProgress = { ...hangarProgress, livery: { ...hangarProgress.livery, [a]: c } }
       showHangar()
+    },
+    onSelectAircraft: (a) => log(`onSelectAircraft(${a})`),
+    onBack: () => showTitle(veteran),
+  })
+}
+let sandboxSettings: Settings = DEFAULT_SETTINGS
+const showSettings = (): void => {
+  hud.setVisible(false)
+  screens.showSettings(sandboxSettings, {
+    onChange: (s) => {
+      sandboxSettings = s
+      input.setInvertPitch(s.invertPitch)
+      hud.setCoaching(s.coaching)
+      log(`onChange(${JSON.stringify(s)})`)
     },
     onBack: () => showTitle(veteran),
   })
@@ -222,6 +237,7 @@ dev.append(
   btn('Results', () => showResults('arrived')),
   btn('Crash', () => showResults('crashed')),
   btn('Hangar', showHangar),
+  btn('Settings', showSettings),
   readout,
 )
 
@@ -234,6 +250,7 @@ switch (initial) {
   case 'results': showResults('arrived'); break
   case 'results-crash': showResults('crashed'); break
   case 'hangar': showHangar(); break
+  case 'settings': showSettings(); break
   default: showHud()
 }
 

@@ -2,6 +2,7 @@ import type { CreateScreens, Screens } from '../../core/presentation'
 import { h } from '../dom'
 import { renderHangar, type HangarMemory } from './hangar'
 import { renderResults } from './results'
+import { renderSettings } from './settings'
 import { renderTitle, type TitleMemory } from './title'
 import { MENU_EVENT } from '../input/stick'
 import './screens.css'
@@ -26,7 +27,9 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
     if (document.pointerLockElement) document.exitPointerLock()
     window.dispatchEvent(new Event(MENU_EVENT))
     const sameKind = layer.firstElementChild?.getAttribute('aria-label') === screen.getAttribute('aria-label')
-    const scroll = sameKind ? (layer.firstElementChild as HTMLElement).scrollTop : 0
+    const old = layer.firstElementChild as HTMLElement | null
+    const scroll = sameKind && old ? old.scrollTop : 0
+    const innerScroll = sameKind ? (old?.querySelector<HTMLElement>('[data-keep-scroll]')?.scrollTop ?? 0) : 0
     const active = document.activeElement
     const focusKey = sameKind && active instanceof HTMLElement && layer.contains(active) ? active.dataset.key : undefined
     screen.classList.toggle('is-refresh', sameKind)
@@ -34,6 +37,8 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
     layer.replaceChildren(screen)
     layer.classList.remove('is-hidden')
     screen.scrollTop = scroll
+    const inner = screen.querySelector<HTMLElement>('[data-keep-scroll]')
+    if (inner) inner.scrollTop = innerScroll
     onEscape = escape
     const target = focusKey
       ? screen.querySelector<HTMLElement>(`[data-key="${CSS.escape(focusKey)}"]`)
@@ -51,7 +56,10 @@ export const createScreens: CreateScreens = (root: HTMLElement): Screens => {
       mount(renderResults(model, cb), '.wr-actions .wr-btn--primary', cb.onMenu)
     },
     showHangar(model, cb) {
-      mount(renderHangar(model, cb, hangarMemory), '.wr-trophy[aria-pressed="true"]', cb.onBack)
+      mount(renderHangar(model, cb, hangarMemory), '.wr-pick[aria-pressed="true"]', cb.onBack)
+    },
+    showSettings(settings, cb) {
+      mount(renderSettings(settings, cb), '.wr-setting input', cb.onBack)
     },
     dispose() {
       window.removeEventListener('keydown', onKey)

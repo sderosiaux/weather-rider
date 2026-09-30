@@ -42,7 +42,7 @@ export const stickFromOffset = (
   const uy = ny / mag
   const roll = expo(ux * scaled, shape.expo)
   const pitch = expo(uy * scaled, shape.expo)
-  return { pitch: invertPitch ? -pitch : pitch, roll }
+  return { pitch: orientPitch(pitch, invertPitch), roll }
 }
 
 /** Two digital keys → -1 / 0 / +1. */
@@ -69,3 +69,9 @@ export const mixAxis = (sources: readonly number[], epsilon = 1e-3): number => {
   for (const v of sources) if (Math.abs(v) > epsilon) return clamp(v, -1, 1)
   return 0
 }
+
+/**
+ * Pitch convention. `upInput` is "toward the top of the screen" (mouse up, W/↑, stick pushed forward) in -1..1.
+ * Default: up = nose up (arcade). invert: pull back (down, S/↓) = nose up, like a real yoke.
+ */
+export const orientPitch = (upInput: number, invert: boolean): number => (invert ? -upInput : upInput)

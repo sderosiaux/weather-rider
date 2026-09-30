@@ -42,7 +42,6 @@
   --wr-halo: 0 0 1px rgba(255, 255, 255, 0.55), 0 0 10px rgba(255, 255, 255, 0.6);
   --wr-shadow-float: 0 1px 1px rgba(15, 30, 50, 0.05), 0 8px 28px rgba(15, 30, 50, 0.14);
   --wr-shadow-lift: 0 2px 4px rgba(15, 30, 50, 0.06), 0 18px 48px rgba(15, 30, 50, 0.18);
-  --wr-sil-shadow: drop-shadow(0 6px 6px rgba(15, 30, 50, 0.16));
   --wr-surface: #fbfcfe;
   --wr-surface-sunk: rgba(21, 38, 58, 0.04);
   --wr-scrim: linear-gradient(100deg, rgba(236, 242, 248, 0.9) 0%, rgba(236, 242, 248, 0.72) 45%, rgba(236, 242, 248, 0.4) 100%);
@@ -50,7 +49,6 @@
   /* Title over the live demo flight: light only where the words are, the sky stays sharp elsewhere */
   --wr-title-halo: radial-gradient(closest-side, rgba(238, 243, 249, 0.8) 0%, rgba(238, 243, 249, 0.62) 50%, rgba(238, 243, 249, 0.28) 78%, rgba(238, 243, 249, 0) 100%);
   --wr-title-text-halo: 0 0 18px rgba(245, 248, 252, 0.9), 0 0 2px rgba(245, 248, 252, 0.8);
-  --wr-spotlight: radial-gradient(60% 46% at 50% 58%, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0) 100%);
 
   /* Signal colors, used only to carry meaning */
   --wr-calm: #237a70;        /* comfort, ok, ahead of ghost, benefit */

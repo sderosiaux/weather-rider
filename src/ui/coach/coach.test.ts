@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { HudModel } from '../../core/types'
 import { HINT_TEXT, MASTERY, TIMING, initialCoach, stepCoach, type CoachEvent, type CoachState, type HintId } from './coach'
 import { skyLine } from './sky'
-import { DEFAULT_MEMORY, parseMemory } from './store'
+import { COACH_KEY, DEFAULT_MEMORY, parseMemory, saveMemory } from './store'
 
 const base: HudModel = {
   dailyNumber: 1,
@@ -173,23 +173,28 @@ describe('coach: retirement', () => {
 
 describe('coach memory', () => {
   it('parses a valid record and drops duplicates', () => {
-    const m = parseMemory(JSON.stringify({ version: 1, enabled: false, retired: ['jet', 'jet', 'storm'], jetRideS: 4 }))
-    expect(m).toEqual({ version: 1, enabled: false, retired: ['jet', 'storm'], jetRideS: 4 })
+    const m = parseMemory(JSON.stringify({ version: 1, retired: ['jet', 'jet', 'storm'], jetRideS: 4 }))
+    expect(m).toEqual({ version: 1, retired: ['jet', 'storm'], jetRideS: 4 })
+  })
+  it('migrates pre-settings records: drops `enabled`, keeps lessons', () => {
+    const m = parseMemory(JSON.stringify({ version: 1, enabled: false, retired: ['updraft'], jetRideS: 7 }))
+    expect(m).toEqual({ version: 1, retired: ['updraft'], jetRideS: 7 })
   })
   it('resets on missing, corrupt, unknown version or unknown hint ids', () => {
     expect(parseMemory(null)).toEqual(DEFAULT_MEMORY)
     expect(parseMemory('{nope')).toEqual(DEFAULT_MEMORY)
-    expect(parseMemory(JSON.stringify({ version: 2, enabled: true, retired: [] }))).toEqual(DEFAULT_MEMORY)
-    expect(parseMemory(JSON.stringify({ version: 1, enabled: true, retired: ['teleport'] }))).toEqual(DEFAULT_MEMORY)
+    expect(parseMemory(JSON.stringify({ version: 2, retired: [] }))).toEqual(DEFAULT_MEMORY)
+    expect(parseMemory(JSON.stringify({ version: 1, retired: ['teleport'] }))).toEqual(DEFAULT_MEMORY)
     expect(parseMemory('null')).toEqual(DEFAULT_MEMORY)
   })
   it('sanitizes a bad jet counter without losing the rest', () => {
-    expect(parseMemory(JSON.stringify({ version: 1, enabled: true, retired: ['fuel'], jetRideS: -3 }))).toEqual({
-      version: 1,
-      enabled: true,
-      retired: ['fuel'],
-      jetRideS: 0,
-    })
+    expect(parseMemory(JSON.stringify({ version: 1, retired: ['fuel'], jetRideS: -3 }))).toEqual({ version: 1, retired: ['fuel'], jetRideS: 0 })
+  })
+  it('saves only lesson memory', () => {
+    const store = new Map<string, string>()
+    const kv = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) }
+    saveMemory({ ...parseMemory(JSON.stringify({ version: 1, enabled: true, retired: ['jet'], jetRideS: 20 })) }, kv)
+    expect(JSON.parse(store.get(COACH_KEY)!)).toEqual({ version: 1, retired: ['jet'], jetRideS: 20 })
   })
 })
 
