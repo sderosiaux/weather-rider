@@ -71,7 +71,7 @@ const G_STRESS_ONSET = 0.7
  * with V: every airframe pays about the same for crossing the same storm core (slow ones stay in it longer).
  * Tuned by the balance lab: a straight pass through an extreme core costs 10–30 %.
  */
-const TURBULENCE_STRESS_RATE = 0.0024
+const TURBULENCE_STRESS_RATE = 0.0033
 const TURBULENCE_REF_SPEED = 222
 const INSTANT_FAILURE_FACTOR = 1.5
 /** Diving beyond the fastest level-flight dynamic pressure loads the airframe too. */
