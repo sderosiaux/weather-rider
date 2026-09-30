@@ -4,6 +4,7 @@
 //   class=<AircraftClass>   alt=<m> altitude offset (contrails show above ~6500 m)
 //   clean=1        hide the panel
 //   showcase=<AircraftClass> | cycle   hangar trophy view (cycle: next class every 4 s; key S toggles)
+//   livery=<hex without #>   override the livery (showcase + flight)
 //   level=1        wings level (the fixture banks up to knife-edge; handy to inspect silhouettes)
 //   stress=<n>     render n times per frame (GPU headroom: fps × n = frames the GPU could sustain)
 import { qFromAxisAngle, v3 } from '../src/core/math'
@@ -36,7 +37,8 @@ const CLASSES: readonly { cls: AircraftClass; lengthM: number; cruise: number; l
 
 const specFor = (cls: AircraftClass): { spec: AircraftSpec; livery: string } => {
   const c = CLASSES.find((k) => k.cls === cls) ?? CLASSES[0]!
-  return { spec: { ...fixtureAircraft, id: `sandbox-${cls}`, class: cls, lengthM: c.lengthM, cruiseSpeedMs: c.cruise }, livery: c.livery }
+  const override = params.get('livery')
+  return { spec: { ...fixtureAircraft, id: `sandbox-${cls}`, class: cls, lengthM: c.lengthM, cruiseSpeedMs: c.cruise }, livery: override ? `#${override}` : c.livery }
 }
 
 /** Fixture wind field + a denser, storm-season feature list so the clouds can be judged at game density. */

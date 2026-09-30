@@ -96,7 +96,14 @@ export const createWorldView: CreateWorldView = (canvas) => {
   // Showcase rim: a cool back light that only touches the aircraft pass.
   const rim = new THREE.DirectionalLight(new THREE.Color(0.65, 0.8, 1.0), 0)
   rim.layers.set(AIRCRAFT_LAYER)
-  scene.add(rim, rim.target)
+  // Studio key from the camera side: whatever the turntable angle, the side we see is lit and the
+  // livery reads as its own colour (the fixed low sun alone leaves half the turn in shadow).
+  const key = new THREE.DirectionalLight(new THREE.Color(1.0, 0.93, 0.84), 0)
+  key.layers.set(AIRCRAFT_LAYER)
+  scene.add(rim, rim.target, key, key.target)
+  const hemiGroundFlight = hemi.groundColor.clone()
+  /** Showcase bounce: sunlit cloud tops below, instead of the dark sea. */
+  const hemiGroundShowcase = new THREE.Color(0.5, 0.47, 0.44)
   scene.add(sky, sea.mesh, cloudPass.composite, clouds.depthMesh, aircraft.worldObjects, ghosts.group, gate.group, sun, hemi, aircraft.group)
   const drawingSize = new THREE.Vector2()
 
@@ -178,7 +185,12 @@ export const createWorldView: CreateWorldView = (canvas) => {
     rim.position.copy(stage).addScaledVector(camShowPos, -1).addScaledVector(upY, 0.6)
     rim.target.position.copy(stage)
     rim.intensity = 2.2 * e
-    sun.intensity = 3.2 + 1.3 * e
+    sun.intensity = 3.2 + 0.6 * e
+    hemi.groundColor.copy(hemiGroundFlight).lerp(hemiGroundShowcase, e)
+    // Key: from the camera direction, raised and swung a little left of it.
+    key.position.copy(camShowPos).applyAxisAngle(upY, 0.45).addScaledVector(upY, 0.55).add(stage)
+    key.target.position.copy(stage)
+    key.intensity = 2.4 * e
     camShowPos.multiplyScalar(distance).add(stage)
     lookM.lookAt(camShowPos, stage, upY)
     camShowQ.setFromRotationMatrix(lookM)

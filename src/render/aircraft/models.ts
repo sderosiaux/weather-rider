@@ -26,23 +26,31 @@ interface Paint {
   readonly engine: THREE.Color
   readonly glass: THREE.Color
   readonly windows: THREE.Color
+  /** Contrasts with the livery: cheat-line, engine lips, winglets. */
+  readonly accent: THREE.Color
 }
 
-function colorize(geo: THREE.BufferGeometry, color: THREE.Color | ((p: THREE.Vector3) => THREE.Color)): THREE.BufferGeometry {
+/**
+ * Vertex colours from a paint function sampled at face centroids. perQuad: triangles come in pairs
+ * forming quads (lathe surfaces); colouring the pair together keeps livery bands straight instead of
+ * sawtoothed along the quad diagonals.
+ */
+function colorize(geo: THREE.BufferGeometry, color: THREE.Color | ((p: THREE.Vector3) => THREE.Color), perQuad = false): THREE.BufferGeometry {
   const g = geo.index ? geo.toNonIndexed() : geo
   g.deleteAttribute('uv')
   g.deleteAttribute('normal')
   const pos = g.getAttribute('position')
   const colors = new Float32Array(pos.count * 3)
   const p = new THREE.Vector3()
-  const tri = new THREE.Vector3()
-  for (let i = 0; i < pos.count; i += 3) {
-    // Colour per triangle (centroid) so livery splits stay crisp on a low-poly mesh.
-    tri.set(0, 0, 0)
-    for (let k = 0; k < 3; k++) tri.add(p.fromBufferAttribute(pos, i + k))
-    tri.multiplyScalar(1 / 3)
-    const c = typeof color === 'function' ? color(tri) : color
-    for (let k = 0; k < 3; k++) c.toArray(colors, (i + k) * 3)
+  const centroid = new THREE.Vector3()
+  const step = perQuad ? 6 : 3
+  for (let i = 0; i < pos.count; i += step) {
+    const n = Math.min(step, pos.count - i)
+    centroid.set(0, 0, 0)
+    for (let k = 0; k < n; k++) centroid.add(p.fromBufferAttribute(pos, i + k))
+    centroid.multiplyScalar(1 / n)
+    const c = typeof color === 'function' ? color(centroid) : color
+    for (let k = 0; k < n; k++) c.toArray(colors, (i + k) * 3)
   }
   g.setAttribute('color', new THREE.BufferAttribute(colors, 3))
   return g
@@ -152,17 +160,18 @@ const bodyPaint = (paint: Paint, splitY: number) => (p: THREE.Vector3): THREE.Co
   p.y > splitY + 0.012 ? paint.livery : p.y < -splitY * 0.6 ? paint.belly : paint.body
 
 /**
- * Airliner livery on a tube of radius r: white crown, a row of windows, a livery cheat-line along the
- * side, grey belly, livery tail cone. Rows follow the lathe facets (FUSELAGE_SEGMENTS around).
+ * Airliner livery on a tube of radius r: the livery is the fuselage colour, a contrasting accent draws
+ * the cheat-line, a row of windows, a shaded belly. Rows follow the lathe facets (FUSELAGE_SEGMENTS around).
  */
-const tubePaint = (paint: Paint, r: number) => (p: THREE.Vector3): THREE.Color => {
+const tubePaint = (paint: Paint) => (p: THREE.Vector3): THREE.Color => {
   if (p.x < -0.38) return paint.livery
-  const yr = p.y / r
+  // Height as the sine of the angle around the fuselage axis: bands stay parallel into nose and tail.
+  const yr = p.y / Math.max(1e-6, Math.hypot(p.y, p.z))
   const cabin = p.x < 0.36 && p.x > -0.3
   if (yr > 0.3 && yr < 0.6 && cabin) return paint.windows
-  if (yr > 0.02 && yr <= 0.3) return paint.livery
+  if (yr > 0.02 && yr <= 0.3) return paint.accent
   if (yr < -0.4) return paint.belly
-  return paint.body
+  return paint.livery
 }
 
 const FUSELAGE_SEGMENTS = 20
@@ -188,7 +197,7 @@ function tube(noseLen: number, r: number, tailStart: number, tailR: number): (re
 function turboprop(paint: Paint): Built {
   const r = 0.052
   const parts = [
-    colorize(fuselage(tube(0.1, r, -0.22, 0.012), FUSELAGE_SEGMENTS, 0.03), tubePaint(paint, r)),
+    colorize(fuselage(tube(0.1, r, -0.22, 0.012), FUSELAGE_SEGMENTS, 0.03), tubePaint(paint), true),
     cockpit(0.41, 0.028, 0.032, paint.glass),
     ...pair({ x: 0.08, y: r * 0.95, root: 0.1, tip: 0.06, span: 0.5, sweep: 0.01, dihedral: 0.02, thick: 0.014 }, paint.wing),
     // T-tail
@@ -197,7 +206,7 @@ function turboprop(paint: Paint): Built {
   ]
   const props: Built['props'] = []
   for (const z of [-0.16, 0.16]) {
-    parts.push(...nacelle(0.17, r * 0.8, z, 0.24, 0.025, paint.body, paint.engine))
+    parts.push(...nacelle(0.17, r * 0.8, z, 0.24, 0.025, paint.livery, paint.engine))
     const spinner = new THREE.ConeGeometry(0.014, 0.04, 8)
     spinner.rotateZ(-Math.PI / 2)
     spinner.translate(0.19, r * 0.8, z)
@@ -210,14 +219,14 @@ function turboprop(paint: Paint): Built {
 function regional(paint: Paint): Built {
   const r = 0.045
   const parts = [
-    colorize(fuselage(tube(0.09, r, -0.2, 0.01), FUSELAGE_SEGMENTS, 0.02), tubePaint(paint, r)),
+    colorize(fuselage(tube(0.09, r, -0.2, 0.01), FUSELAGE_SEGMENTS, 0.02), tubePaint(paint), true),
     cockpit(0.425, 0.022, 0.028, paint.glass),
     ...pair({ x: 0.08, y: -r * 0.6, root: 0.14, tip: 0.045, span: 0.36, sweep: 0.1, dihedral: 0.07, thick: 0.014 }, paint.wing),
     colorize(slab({ x: -0.28, y: 0.03, root: 0.15, tip: 0.1, span: 0.16, sweep: 0.13, dihedral: 0, thick: 0.012 }, 1, true), paint.livery),
     ...pair({ x: -0.42, y: 0.19, root: 0.08, tip: 0.04, span: 0.13, sweep: 0.05, dihedral: 0, thick: 0.008 }, paint.body),
   ]
   for (const z of [-1, 1]) {
-    parts.push(...nacelle(-0.2, 0.03, z * (r + 0.03), 0.13, 0.022, paint.body, paint.livery))
+    parts.push(...nacelle(-0.2, 0.03, z * (r + 0.03), 0.13, 0.022, paint.livery, paint.accent))
     parts.push(pylon(-0.24, 0.03, 0.03, z * (r + 0.005), 0.06, paint.body))
   }
   return { parts, props: [], exhausts: [new THREE.Vector3(-0.34, 0.03, -(r + 0.03)), new THREE.Vector3(-0.34, 0.03, r + 0.03)], tailTop: new THREE.Vector3(-0.47, 0.2, 0), beacon: new THREE.Vector3(0.0, r + 0.005, 0) }
@@ -225,7 +234,7 @@ function regional(paint: Paint): Built {
 
 function airliner(paint: Paint, r: number, span: number, engines: number): Built {
   const parts = [
-    colorize(fuselage(tube(0.08, r, -0.24, 0.012), FUSELAGE_SEGMENTS, 0.02), tubePaint(paint, r)),
+    colorize(fuselage(tube(0.08, r, -0.24, 0.012), FUSELAGE_SEGMENTS, 0.02), tubePaint(paint), true),
     cockpit(0.43, r * 0.45, r * 0.55, paint.glass),
     ...pair({ x: 0.14, y: -r * 0.55, root: 0.2, tip: 0.05, span, sweep: span * 0.55, dihedral: 0.09, thick: 0.02 }, paint.wing),
     colorize(slab({ x: -0.3, y: r * 0.6, root: 0.18, tip: 0.07, span: 0.17, sweep: 0.15, dihedral: 0, thick: 0.012 }, 1, true), paint.livery),
@@ -234,7 +243,7 @@ function airliner(paint: Paint, r: number, span: number, engines: number): Built
   // Livery winglets at the tips.
   const tipX = 0.14 - span * 0.55
   const tipY = -r * 0.55 + Math.tan(0.09) * span
-  for (const side of [-1, 1]) parts.push(colorize(slab({ x: tipX, y: tipY, z0: side * span, root: 0.05, tip: 0.025, span: 0.045, sweep: 0.03, dihedral: 0, thick: 0.004 }, 1, true), paint.livery))
+  for (const side of [-1, 1]) parts.push(colorize(slab({ x: tipX, y: tipY, z0: side * span, root: 0.05, tip: 0.025, span: 0.045, sweep: 0.03, dihedral: 0, thick: 0.004 }, 1, true), paint.accent))
   const exhausts: THREE.Vector3[] = []
   const stations = engines === 4 ? [0.62, 0.33] : [0.34]
   const er = r * 0.55
@@ -243,7 +252,7 @@ function airliner(paint: Paint, r: number, span: number, engines: number): Built
       const z = side * span * s
       const x = 0.14 - span * 0.55 * s + 0.07
       const y = -r * 0.55 + Math.tan(0.09) * span * s - er * 1.3
-      parts.push(...nacelle(x, y, z, 0.1, er, paint.body, paint.livery))
+      parts.push(...nacelle(x, y, z, 0.1, er, paint.livery, paint.accent))
       parts.push(pylon(x - 0.02, y, y + er * 1.3, z, 0.08, paint.wing))
       exhausts.push(new THREE.Vector3(x - 0.1, y, z))
     }
@@ -254,7 +263,7 @@ function airliner(paint: Paint, r: number, span: number, engines: number): Built
 function cargo(paint: Paint): Built {
   const r = 0.065
   const parts = [
-    colorize(fuselage(tube(0.1, r, -0.18, 0.02), FUSELAGE_SEGMENTS, 0.07), tubePaint(paint, r)),
+    colorize(fuselage(tube(0.1, r, -0.18, 0.02), FUSELAGE_SEGMENTS, 0.07), tubePaint(paint), true),
     cockpit(0.42, r * 0.55, 0.04, paint.glass),
     // High wing with anhedral
     ...pair({ x: 0.12, y: r * 0.9, root: 0.2, tip: 0.06, span: 0.52, sweep: 0.16, dihedral: -0.05, thick: 0.022 }, paint.wing),
@@ -267,7 +276,7 @@ function cargo(paint: Paint): Built {
       const z = side * 0.52 * s
       const x = 0.12 - 0.16 * s + 0.06
       const y = r * 0.9 - Math.tan(0.05) * 0.52 * s - 0.04
-      parts.push(...nacelle(x, y, z, 0.1, 0.024, paint.body, paint.livery))
+      parts.push(...nacelle(x, y, z, 0.1, 0.024, paint.livery, paint.accent))
       parts.push(pylon(x - 0.02, y, y + 0.035, z, 0.07, paint.wing))
       exhausts.push(new THREE.Vector3(x - 0.1, y, z))
     }
@@ -279,7 +288,7 @@ function supersonic(paint: Paint): Built {
   const r = 0.024
   const profile: (readonly [number, number])[] = [[0.5, 0.0005], [0.44, r * 0.45], [0.36, r * 0.85], [0.28, r], [-0.35, r], [-0.46, r * 0.6], [-0.5, r * 0.3]]
   const parts = [
-    colorize(fuselage(profile, FUSELAGE_SEGMENTS, 0), tubePaint(paint, r)),
+    colorize(fuselage(profile, FUSELAGE_SEGMENTS, 0), tubePaint(paint), true),
     cockpit(0.33, r * 0.6, r * 0.7, paint.glass),
     // Ogival delta approximated by two slabs: long strake + main delta.
     ...pair({ x: 0.2, y: -r * 0.3, root: 0.62, tip: 0.36, span: 0.06, sweep: 0.2, dihedral: 0, thick: 0.014 }, paint.wing),
@@ -298,9 +307,9 @@ function supersonic(paint: Paint): Built {
 
 function experimental(paint: Paint): Built {
   // Blended wing body: a thick lifting centre section flowing into thin outer wings.
-  const center = colorize(slab({ x: 0.5, y: 0, root: 1.0, tip: 0.42, span: 0.2, sweep: 0.36, dihedral: 0, thick: 0.1 }, 1), bodyPaint(paint, 0.03))
-  const center2 = colorize(slab({ x: 0.5, y: 0, root: 1.0, tip: 0.42, span: 0.2, sweep: 0.36, dihedral: 0, thick: 0.1 }, -1), bodyPaint(paint, 0.03))
-  const nose = colorize(fuselage([[0.5, 0.0005], [0.42, 0.05], [0.25, 0.08], [0.0, 0.085], [-0.3, 0.06], [-0.5, 0.01]], 12, 0, 0.55, 1.6), bodyPaint(paint, 0.01))
+  const center = colorize(slab({ x: 0.5, y: 0, root: 1.0, tip: 0.42, span: 0.2, sweep: 0.36, dihedral: 0, thick: 0.1 }, 1), bodyPaint(paint, -0.02))
+  const center2 = colorize(slab({ x: 0.5, y: 0, root: 1.0, tip: 0.42, span: 0.2, sweep: 0.36, dihedral: 0, thick: 0.1 }, -1), bodyPaint(paint, -0.02))
+  const nose = colorize(fuselage([[0.5, 0.0005], [0.42, 0.05], [0.25, 0.08], [0.0, 0.085], [-0.3, 0.06], [-0.5, 0.01]], 12, 0, 0.55, 1.6), bodyPaint(paint, -0.02))
   const parts = [
     nose, center, center2,
     cockpit(0.36, 0.035, 0.03, paint.glass),
@@ -323,10 +332,15 @@ function experimental(paint: Paint): Built {
 
 export function buildAircraft(cls: AircraftClass, lengthM: number, livery: string): AircraftModel {
   const liveryColor = new THREE.Color(livery)
+  // Light liveries get a deep navy accent, dark ones a white one: the trim always reads.
+  const luminance = 0.2126 * liveryColor.r + 0.7152 * liveryColor.g + 0.0722 * liveryColor.b
+  const accent = luminance > 0.35 ? new THREE.Color(0.06, 0.1, 0.2) : new THREE.Color(0.9, 0.9, 0.88)
   const paint: Paint = {
     livery: liveryColor,
+    accent,
     body: new THREE.Color(0.92, 0.92, 0.9),
-    belly: new THREE.Color(0.62, 0.64, 0.66),
+    // Belly: the livery in shade, pulled toward grey so dark liveries keep a readable underside.
+    belly: liveryColor.clone().multiplyScalar(0.7).lerp(new THREE.Color(0.55, 0.57, 0.6), 0.35),
     wing: new THREE.Color(0.72, 0.74, 0.76),
     engine: new THREE.Color(0.32, 0.34, 0.37),
     glass: new THREE.Color(0.05, 0.07, 0.1),
