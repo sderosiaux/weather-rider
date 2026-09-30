@@ -151,7 +151,18 @@ export function startApp(root: HTMLElement): void {
     })
   }
 
-  const showcase = (aircraftId: string): void => world.setShowcase({ spec: specFor(aircraftId), liveryColor: liveryOf(aircraftId) })
+  /** The hangar trophy sits in the demo sky: freeze that flight and quiet the wind so the aircraft is the subject. */
+  let hangarOpen = false
+  const showcase = (aircraftId: string): void => {
+    hangarOpen = true
+    flow.setIntensity(settings.flowIntensity * 0.25)
+    world.setShowcase({ spec: specFor(aircraftId), liveryColor: liveryOf(aircraftId) })
+  }
+  const closeHangar = (): void => {
+    hangarOpen = false
+    flow.setIntensity(settings.flowIntensity)
+    world.setShowcase(null)
+  }
 
   const showHangar = (): void => {
     screens.showHangar({ progress, aircraft: AIRCRAFT, upgrades: UPGRADES, unlockHints: unlockHints(progress) }, {
@@ -169,7 +180,7 @@ export function startApp(root: HTMLElement): void {
       },
       onSelectAircraft: showcase,
       onBack: () => {
-        world.setShowcase(null)
+        closeHangar()
         showTitle()
       },
     })
@@ -264,7 +275,7 @@ export function startApp(root: HTMLElement): void {
       if (outcome) finish(session, outcome)
     } else if (mode.kind === 'title') {
       input.read()
-      if (mode.demo.advance(dtReal, mode.autopilot)) startDemo()
+      if (!hangarOpen && mode.demo.advance(dtReal, mode.autopilot)) startDemo()
       const s = mode.demo.state()
       world.update({ state: s, ghostPoses: [], dtReal })
       flow.update(world.camera, s.t, dtReal)
