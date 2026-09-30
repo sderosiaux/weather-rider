@@ -3,6 +3,7 @@
 //   weather=fixture | rich (default: rich = fixture + a storm-season feature set, visuals only)
 //   class=<AircraftClass>   alt=<m> altitude offset (contrails show above ~6500 m)
 //   clean=1        hide the panel
+//   showcase=<AircraftClass> | cycle   hangar trophy view (cycle: next class every 4 s; key S toggles)
 //   level=1        wings level (the fixture banks up to knife-edge; handy to inspect silhouettes)
 //   stress=<n>     render n times per frame (GPU headroom: fps × n = frames the GPU could sustain)
 import { qFromAxisAngle, v3 } from '../src/core/math'
@@ -80,6 +81,28 @@ const applyClass = (cls: AircraftClass): void => {
 select.value = (params.get('class') as AircraftClass | null) ?? 'turboprop'
 applyClass(select.value as AircraftClass)
 select.addEventListener('change', () => applyClass(select.value as AircraftClass))
+
+const showcaseParam = params.get('showcase')
+let showcaseIndex = Math.max(0, CLASSES.findIndex((c) => c.cls === showcaseParam))
+let showcaseOn = showcaseParam !== null
+const applyShowcase = (): void => {
+  const c = CLASSES[showcaseIndex]!
+  const { spec, livery } = specFor(c.cls)
+  view.setShowcase(showcaseOn ? { spec, liveryColor: livery } : null)
+}
+applyShowcase()
+if (showcaseParam === 'cycle') {
+  setInterval(() => {
+    showcaseIndex = (showcaseIndex + 1) % CLASSES.length
+    applyShowcase()
+  }, 4000)
+}
+window.addEventListener('keydown', (e) => {
+  if (e.key === 's' || e.key === 'S') {
+    showcaseOn = !showcaseOn
+    applyShowcase()
+  }
+})
 
 const ghost = createFixtureGhost(3)
 view.setGhosts([{ ghost, spec: fixtureAircraft, color: '#ffc46b', showTrail: true }])

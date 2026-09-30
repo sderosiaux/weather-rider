@@ -17,6 +17,10 @@ export interface AircraftVisual {
   readonly worldObjects: THREE.Object3D
   set(spec: AircraftSpec, livery: string): void
   update(state: AircraftState, time: number, dtReal: number): void
+  /** Place the airframe freely (hangar showcase): props and lights animate, no contrails. */
+  pose(position: THREE.Vector3, orientation: THREE.Quaternion, time: number, dtReal: number): void
+  /** 0..1 fade for airframe swaps; the aircraft pass draws it on top, so blending is safe. */
+  setOpacity(opacity: number): void
   readonly model: AircraftModel | null
   setPixelAngle(a: number): void
   dispose(): void
@@ -94,6 +98,24 @@ export function createAircraftVisual(atmosphere: AtmosphereUniforms, glow: THREE
     tr.count++
   }
 
+  const animate = (time: number, dtReal: number, throttle: number): void => {
+    for (const p of props) {
+      const s = p.getObjectByName('spinner')
+      if (s) s.rotation.x += dtReal * 55 * (0.4 + throttle)
+    }
+    // Strobes: double white flash on the wingtips, slower red beacon.
+    const ph = time % 1.3
+    const strobe = ph < 0.05 || (ph > 0.14 && ph < 0.19) ? 1 : 0
+    const beacon = time % 1.0 < 0.12 ? 1 : 0
+    const colors = strobeGeo.getAttribute('color') as THREE.BufferAttribute | undefined
+    if (colors) {
+      colors.setXYZ(0, 3 * strobe, 3 * strobe, 3 * strobe)
+      colors.setXYZ(1, 3 * strobe, 3 * strobe, 3 * strobe)
+      colors.setXYZ(2, 3 * beacon, 0.15 * beacon, 0.1 * beacon)
+      colors.needsUpdate = true
+    }
+  }
+
   return {
     group,
     worldObjects,
@@ -130,24 +152,27 @@ export function createAircraftVisual(atmosphere: AtmosphereUniforms, glow: THREE
       strobeGeo.setAttribute('color', new THREE.Float32BufferAttribute([...white.toArray(), ...white.toArray(), ...red.toArray()], 3))
       for (const t of trails) t.count = 0
     },
+    pose(position, orientation, time, dtReal) {
+      group.position.copy(position)
+      group.quaternion.copy(orientation)
+      animate(time, dtReal, 0.6)
+      for (const t of trails) t.ribbon.mesh.visible = false
+    },
+    setOpacity(opacity) {
+      const o = Math.min(1, Math.max(0, opacity))
+      // Depth writes stay on while fading: the airframe's own inner faces must not show through.
+      for (const m of [material, bladeMat]) {
+        m.opacity = o
+        m.transparent = o < 0.999
+      }
+      propDiscMat.opacity = 0.1 * o
+      navMat.opacity = strobeMat.opacity = o
+      group.visible = o > 0.001
+    },
     update(state, time, dtReal) {
       group.position.set(state.pos.x, state.pos.y, state.pos.z)
       group.quaternion.set(state.orientation.x, state.orientation.y, state.orientation.z, state.orientation.w)
-      for (const p of props) {
-        const s = p.getObjectByName('spinner')
-        if (s) s.rotation.x += dtReal * 55 * (0.4 + state.throttle)
-      }
-      // Strobes: double white flash on the wingtips, slower red beacon.
-      const ph = time % 1.3
-      const strobe = ph < 0.05 || (ph > 0.14 && ph < 0.19) ? 1 : 0
-      const beacon = time % 1.0 < 0.12 ? 1 : 0
-      const colors = strobeGeo.getAttribute('color') as THREE.BufferAttribute | undefined
-      if (colors) {
-        colors.setXYZ(0, 3 * strobe, 3 * strobe, 3 * strobe)
-        colors.setXYZ(1, 3 * strobe, 3 * strobe, 3 * strobe)
-        colors.setXYZ(2, 3 * beacon, 0.15 * beacon, 0.1 * beacon)
-        colors.needsUpdate = true
-      }
+      animate(time, dtReal, state.throttle)
 
       if (!model) return
       const teleported = lastPos.distanceToSquared(group.position) > 2000 * 2000
