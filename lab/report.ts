@@ -123,6 +123,8 @@ export interface UnlockRun {
   /** aircraft → flight number at which it unlocked (null = not within the cap). */
   readonly at: Record<string, number | null>
   readonly flights: number
+  /** Flight number at which each upgrade unlocked, in order. */
+  readonly upgradeFlights: readonly number[]
 }
 
 /**
@@ -141,6 +143,7 @@ export function simulateUnlocks(
   let progress = newProgress(player)
   const at: Record<string, number | null> = Object.fromEntries(AIRCRAFT_ORDER.map((id) => [id, id === 'turboprop' ? 0 : null]))
   let flights = 0
+  const upgradeFlights: number[] = []
   outer: for (let loop = 0; loop < 10; loop++) {
     for (const day of days) {
       for (const tier of TIERS) {
@@ -166,12 +169,16 @@ export function simulateUnlocks(
         flights++
         const res = recordFlight(progress, { score, dailyNumber: day, routeId: row.routeId, aircraftId: aircraft, ghostCode: '' })
         progress = res.progress
-        for (const id of res.newlyUnlocked) if (id in at && at[id] === null) at[id] = flights
+        for (const id of res.newlyUnlocked) {
+          if (id in at) {
+            if (at[id] === null) at[id] = flights
+          } else upgradeFlights.push(flights)
+        }
         if (progress.unlockedAircraft.length === AIRCRAFT_ORDER.length) break outer
       }
     }
   }
-  return { player, at, flights }
+  return { player, at, flights, upgradeFlights }
 }
 
 // ─── Airframe envelope (evidence for altitude findings) ────────────────────
@@ -428,12 +435,12 @@ export function renderReport(inp: ReportInput): string {
       },
     ],
   ]
-  P(`| player | ${AIRCRAFT_ORDER.join(' | ')} |`)
-  P(`|---|${AIRCRAFT_ORDER.map(() => '---').join('|')}|`)
+  P(`| player | ${AIRCRAFT_ORDER.join(' | ')} | upgrades unlocked at flight # |`)
+  P(`|---|${AIRCRAFT_ORDER.map(() => '---').join('|')}|---|`)
   for (const [name, choose] of players) {
     if (!pilotNames.includes(choose(null)) && name !== 'board-savvy') continue
     const run = simulateUnlocks(rows, inp.days, name, choose)
-    P(`| ${name} | ${AIRCRAFT_ORDER.map((id) => (run.at[id] === null ? '—' : String(run.at[id]))).join(' | ')} |`)
+    P(`| ${name} | ${AIRCRAFT_ORDER.map((id) => (run.at[id] === null ? '—' : String(run.at[id]))).join(' | ')} | ${run.upgradeFlights.join(', ') || '—'} |`)
   }
   P('')
 

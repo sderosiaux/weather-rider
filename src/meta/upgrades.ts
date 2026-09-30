@@ -30,7 +30,8 @@ export const GOOD_DIRECTION: Readonly<Record<NumericSpecKey, 1 | -1 | 0>> = {
   lengthM: 0,
 }
 
-// Score thresholds assume FlightScore boards are roughly 0..1000; tune here and in AIRCRAFT_UNLOCKS only.
+// Boards read 1000 for a good blind flight of the aircraft (scoring/score.ts); score unlocks above ~1000 need the
+// weather. Flight-count unlocks come one per flight from the 2nd to the 8th. Tuned with the balance lab.
 export const UPGRADES: readonly Upgrade[] = [
   // Instruments: how the pilot reads the air.
   {
@@ -46,7 +47,7 @@ export const UPGRADES: readonly Upgrade[] = [
   {
     id: 'inst-gmeter', slot: 'instruments', name: 'Cabin g-meter',
     description: 'You feel what the passengers feel, so you pull gently.',
-    modifiers: { cabinDamping: 0.92, pitchRate: 0.92 }, unlock: { kind: 'score', board: 'smooth', atLeast: 300 },
+    modifiers: { cabinDamping: 0.92, pitchRate: 0.92 }, unlock: { kind: 'score', board: 'smooth', atLeast: 1150 },
   },
   // Radar: seeing weather before it hits.
   {
@@ -62,7 +63,7 @@ export const UPGRADES: readonly Upgrade[] = [
   {
     id: 'radar-lidar', slot: 'radar', name: 'Clear-air lidar',
     description: 'Spots invisible shear. Its generator eats engine power.',
-    modifiers: { gustSensitivity: 0.88, maxThrustN: 0.93, massKg: 1.03 }, unlock: { kind: 'score', board: 'speed', atLeast: 400 },
+    modifiers: { gustSensitivity: 0.88, maxThrustN: 0.93, massKg: 1.03 }, unlock: { kind: 'score', board: 'speed', atLeast: 1050 },
   },
   // Wings.
   {
@@ -78,12 +79,12 @@ export const UPGRADES: readonly Upgrade[] = [
   {
     id: 'wings-swept', slot: 'wings', name: 'Swept tips',
     description: 'Faster cruise and top speed. Stalls earlier, rolls lazier.',
-    modifiers: { maxSpeedMs: 1.06, cruiseSpeedMs: 1.04, stallSpeedMs: 1.08, rollRate: 0.94 }, unlock: { kind: 'score', board: 'speed', atLeast: 500 },
+    modifiers: { maxSpeedMs: 1.06, cruiseSpeedMs: 1.04, stallSpeedMs: 1.08, rollRate: 0.94 }, unlock: { kind: 'score', board: 'speed', atLeast: 1100 },
   },
   {
     id: 'wings-spar', slot: 'wings', name: 'Reinforced spar',
     description: 'Takes more g both ways. Heavier and stiffer in roll.',
-    modifiers: { limitGPos: 1.15, limitGNeg: 1.15, massKg: 1.06, rollRate: 0.92 }, unlock: { kind: 'score', board: 'smooth', atLeast: 500 },
+    modifiers: { limitGPos: 1.15, limitGNeg: 1.15, massKg: 1.06, rollRate: 0.92 }, unlock: { kind: 'score', board: 'smooth', atLeast: 1300 },
   },
   // Engines.
   {
@@ -99,7 +100,7 @@ export const UPGRADES: readonly Upgrade[] = [
   {
     id: 'eng-geared', slot: 'engines', name: 'Geared turbofan',
     description: 'Efficient at cruise, heavy gearbox, runs out of breath up high.',
-    modifiers: { fuelBurnFullKgS: 0.9, massKg: 1.05, serviceCeilingM: 0.94 }, unlock: { kind: 'score', board: 'eco', atLeast: 500 },
+    modifiers: { fuelBurnFullKgS: 0.9, massKg: 1.05, serviceCeilingM: 0.94 }, unlock: { kind: 'score', board: 'eco', atLeast: 1100 },
   },
   // Cabin.
   {
@@ -115,7 +116,7 @@ export const UPGRADES: readonly Upgrade[] = [
   {
     id: 'cabin-lounge', slot: 'cabin', name: 'Lounge cabin',
     description: 'Floating floor, bar and fewer fuel tanks.',
-    modifiers: { cabinDamping: 0.85, massKg: 1.08, fuelCapacityKg: 0.95 }, unlock: { kind: 'score', board: 'smooth', atLeast: 700 },
+    modifiers: { cabinDamping: 0.85, massKg: 1.08, fuelCapacityKg: 0.95 }, unlock: { kind: 'score', board: 'smooth', atLeast: 1400 },
   },
   // Avionics.
   {
@@ -131,13 +132,13 @@ export const UPGRADES: readonly Upgrade[] = [
   {
     id: 'avio-relaxed', slot: 'avionics', name: 'Relaxed stability',
     description: 'Twitchy and quick. Lower structural margin, rougher ride.',
-    modifiers: { pitchRate: 1.15, controlLag: 0.9, limitGPos: 0.9, cabinDamping: 1.08 }, unlock: { kind: 'score', board: 'speed', atLeast: 700 },
+    modifiers: { pitchRate: 1.15, controlLag: 0.9, limitGPos: 0.9, cabinDamping: 1.08 }, unlock: { kind: 'score', board: 'speed', atLeast: 1150 },
   },
   // Livery: trophies, no effect on flight.
   { id: 'livery-classic', slot: 'livery', name: 'Classic cheatline', description: 'The one it left the factory with.', modifiers: {}, unlock: { kind: 'always' } },
-  { id: 'livery-silk', slot: 'livery', name: 'Silk', description: 'Earned by a flight nobody felt.', modifiers: {}, unlock: { kind: 'score', board: 'smooth', atLeast: 850 } },
-  { id: 'livery-jet', slot: 'livery', name: 'Jet stream', description: 'Earned by riding the wind flat out.', modifiers: {}, unlock: { kind: 'score', board: 'speed', atLeast: 850 } },
-  { id: 'livery-leaf', slot: 'livery', name: 'Leaf', description: 'Earned by gliding home on fumes.', modifiers: {}, unlock: { kind: 'score', board: 'eco', atLeast: 850 } },
+  { id: 'livery-silk', slot: 'livery', name: 'Silk', description: 'Earned by a flight nobody felt.', modifiers: {}, unlock: { kind: 'score', board: 'smooth', atLeast: 1500 } },
+  { id: 'livery-jet', slot: 'livery', name: 'Jet stream', description: 'Earned by riding the wind flat out.', modifiers: {}, unlock: { kind: 'score', board: 'speed', atLeast: 1250 } },
+  { id: 'livery-leaf', slot: 'livery', name: 'Leaf', description: 'Earned by gliding home on fumes.', modifiers: {}, unlock: { kind: 'score', board: 'eco', atLeast: 1300 } },
 ]
 
 const BY_ID: ReadonlyMap<string, Upgrade> = new Map(UPGRADES.map((u) => [u.id, u]))

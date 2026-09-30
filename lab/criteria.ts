@@ -87,7 +87,7 @@ export function criteriaSummary(rows: readonly FlightRow[]): Criteria {
     `c) smooth extreme: ahead ${pc(smx.ahead)} gain ${f1(smx.gainPct)}%`,
     `d) direct fuel left median ${f1(directFuel)}% (by aircraft ${directFuelByAc.map((x) => Math.round(x)).join('/')}); reckless dry on extreme: ${recklessDry}; arrivals >60% fuel: ${pc(over60)}   (want 10–30%, >0, 0%)`,
     `e) surfer weather utilization p50 ${f1(surferWu)}%   (want ≥30%)`,
-    `f) board leaders: ${dominance.join(' · ')}; surfer unlock flights ${unlockLine}`,
+    `f) board leaders: ${dominance.join(' · ')}; surfer unlock flights ${unlockLine}; surfer upgrades at flights ${unlocks.upgradeFlights.join(',')}`,
     `h) stress on extreme: direct p50/max ${f1(median(rows.filter((r) => r.pilot === 'direct' && r.tier === 'extreme').map((r) => r.stress)))}/${f1(Math.max(...rows.filter((r) => r.pilot === 'direct' && r.tier === 'extreme').map((r) => r.stress)))}%, surfer max ${f1(Math.max(...rows.filter((r) => r.pilot === 'surfer' && r.tier === 'extreme').map((r) => r.stress)))}%, overstressed ${rows.filter((r) => r.outcome === 'overstressed').length}   (want direct 10–30, dodge < 20)`,
     `g) surfer vs direct speed board, mod+ext: median ${f1(gMedian)}%   (want ≥+10%)`,
     `   direct flight minutes p10/p50/p90 ${f1(quantile(minutes, 0.1))}/${f1(median(minutes))}/${f1(quantile(minutes, 0.9))} (want 6–12); by aircraft ${minutesBy}; failures ${failures}/${rows.length}`,
