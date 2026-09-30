@@ -210,6 +210,7 @@ export function startApp(root: HTMLElement): void {
     const session = createFlightSession({ daily, route, spec, weather, pilot: progress.pilot, ghosts })
     // Start hands-off in trim: the aircraft's trimmed throttle, not whatever the last flight left.
     input.resetForFlight(session.state().throttle)
+    if (import.meta.env.DEV) (window as unknown as { __wr: unknown }).__wr = { session, world, flow }
     const autopilot = dev?.autopilot ? createAutopilot(dev.autopilot, spec, route, weather) : null
     mode = { kind: 'flying', session, autopilot, timeScale: dev?.timeScale ?? 1 }
   }
@@ -302,7 +303,7 @@ export function startApp(root: HTMLElement): void {
    * Dev-only deep link so agents/screenshots reach real in-game states without menus:
    * ?fly=0|1|2 (route index) &aircraft=<id> &at=x,y,z (teleport, meters) &hud=0
    * &autopilot=direct|surfer|eco|reckless (bot flies) &speed=N (sim fast-forward, capped by the session's per-frame clamp)
-   * window.__wr exposes the live session for eval-driven checks.
+   * window.__wr (dev, set by every fly()) exposes the live session for eval-driven checks.
    */
   function debugDeepLink(): void {
     const q = new URLSearchParams(location.search)
@@ -315,6 +316,5 @@ export function startApp(root: HTMLElement): void {
     const at = q.get('at')?.split(',').map(Number)
     if (at && at.length === 3 && at.every(Number.isFinite)) mode.session.teleport({ x: at[0]!, y: at[1]!, z: at[2]! })
     if (q.get('hud') === '0') hud.setVisible(false)
-    ;(window as unknown as { __wr: unknown }).__wr = { session: mode.session, world, flow }
   }
 }
