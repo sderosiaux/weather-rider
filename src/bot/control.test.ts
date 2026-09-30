@@ -147,12 +147,12 @@ describe('spiral entry', () => {
     expect(hi).toBeLessThan(1200 * 1.25)
   })
 
-  it('circling in the fixture updraft climbs ≥ 900 m in 3 minutes; the same circle in still air does not', () => {
+  it('the glider circling in the fixture updraft climbs ≥ 900 m in 3 minutes; the same circle in still air does not', () => {
     const weather = createFixtureWeather(1)
     const center = v3(30_000, 0, 0)
     const at = (s: AircraftState): AircraftState => ({ ...s, pos: v3(28_000, 3000, 0) })
-    const lift = hold('turboprop', weather, orbitIntent('turboprop', center, 1200), 180, at)
-    const calm = hold('turboprop', still, orbitIntent('turboprop', center, 1200), 180, at)
+    const lift = hold('experimental', weather, orbitIntent('experimental', center, 1200), 180, at)
+    const calm = hold('experimental', still, orbitIntent('experimental', center, 1200), 180, at)
     expect(lift.status).toBe('flying')
     expect(lift.pos.y - 3000).toBeGreaterThan(900)
     expect(Math.abs(calm.pos.y - 3000)).toBeLessThan(300)

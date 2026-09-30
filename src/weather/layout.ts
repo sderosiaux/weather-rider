@@ -120,7 +120,7 @@ const LINE_MARGIN = 3500
 const LOW_JET_MIN = 4000
 const LOW_JET_SPAN = 1500
 /** Low jet: lateral offset of its axis from the straight line (m), meander amplitude, horizontal half-width. */
-const LOW_JET_OFFSET = 9000
+const LOW_JET_OFFSET = 8000
 const LOW_JET_OFFSET_SPAN = 4000
 const LOW_JET_MEANDER = 2500
 const LOW_JET_HALF_WIDTH = 4500
