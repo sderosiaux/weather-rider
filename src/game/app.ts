@@ -18,11 +18,12 @@ import {
 } from '../meta'
 import { createAudio } from '../audio'
 import { createAutopilot, STRATEGIES, type Autopilot, type Strategy } from '../bot'
-import { DEFAULT_SETTINGS, type Settings, type UnlockedItem } from '../core/presentation'
+import { DEFAULT_SETTINGS, type BoardKind, type BoardsModel, type Settings, type UnlockedItem } from '../core/presentation'
 import { createWorldView } from '../render'
 import { ghostCodec } from '../scoring'
 import { createHud, createInput, createScreens } from '../ui'
 import { createWeather } from '../weather'
+import { friendEntries, sanitizePilotName } from './friendEntries'
 import { createFlightSession, type FlightSession } from './session'
 
 const GHOST_COLORS = ['#f4b860', '#8ec5ff', '#c9a7ff']
@@ -69,6 +70,7 @@ export function startApp(root: HTMLElement): void {
         volume: typeof parsed.volume === 'number' ? Math.min(1, Math.max(0, parsed.volume)) : DEFAULT_SETTINGS.volume,
         flowIntensity: typeof parsed.flowIntensity === 'number' ? Math.min(1, Math.max(0, parsed.flowIntensity)) : DEFAULT_SETTINGS.flowIntensity,
         coaching: typeof parsed.coaching === 'boolean' ? parsed.coaching : DEFAULT_SETTINGS.coaching,
+        pilotName: sanitizePilotName(parsed.pilotName, DEFAULT_SETTINGS.pilotName),
       }
     } catch {
       return DEFAULT_SETTINGS
@@ -90,6 +92,10 @@ export function startApp(root: HTMLElement): void {
 
   const liveryOf = (id: string): string => progress.livery[id] ?? '#f5f1ea'
   const specFor = (id: string): AircraftSpec => applyLoadout(aircraftById(id), progress.loadouts[id] ?? [])
+
+  /** Race a ghost in its own aircraft when you have it, else in your first one. */
+  const raceAircraft = (ghost: Ghost): string =>
+    progress.unlockedAircraft.includes(ghost.aircraftId) ? ghost.aircraftId : progress.unlockedAircraft[0] ?? AIRCRAFT[0]!.id
 
   const decodeGhost = (code: string | null): Ghost | null => {
     if (!code) return null
@@ -119,6 +125,7 @@ export function startApp(root: HTMLElement): void {
     world.setWeather(weather)
     flow.setWeather(weather)
     world.setRoute(route)
+    world.setSky(today.sky)
     world.setAircraft(spec, liveryOf(spec.id))
     world.setGhosts([])
     const demo = createFlightSession({ daily: today, route, spec, weather, pilot: 'demo', ghosts: [] })
@@ -133,12 +140,31 @@ export function startApp(root: HTMLElement): void {
       onFly: (routeId, aircraftId, ghostCode) => fly(routeId, aircraftId, decodeGhost(ghostCode)),
       onHangar: showHangar,
       onSettings: showSettings,
+      onBoards: showBoards,
+    })
+  }
+
+  const BOARD_KINDS: readonly BoardKind[] = ['smooth', 'speed', 'eco']
+  const showBoards = (): void => {
+    const boards: Record<string, Record<BoardKind, ReturnType<typeof store.localLeaderboard>>> = {}
+    for (const route of today.routes) {
+      boards[route.id] = { smooth: [], speed: [], eco: [] }
+      for (const board of BOARD_KINDS) boards[route.id]![board] = store.localLeaderboard(today.number, route.id, board, 10)
+    }
+    const model: BoardsModel = { daily: today, pilot: settings.pilotName, boards }
+    screens.showBoards(model, {
+      onRace: (entry) => {
+        const ghost = decodeGhost(entry.ghost)
+        if (ghost) fly(ghost.routeId, raceAircraft(ghost), ghost)
+      },
+      onBack: showTitle,
     })
   }
 
   const showSettings = (): void => {
     screens.showSettings(settings, {
-      onChange: (next) => {
+      onChange: (raw) => {
+        const next = { ...raw, pilotName: sanitizePilotName(raw.pilotName, DEFAULT_SETTINGS.pilotName) }
         settings = next
         applySettings(next)
         try {
@@ -201,13 +227,16 @@ export function startApp(root: HTMLElement): void {
     world.setWeather(weather)
     flow.setWeather(weather)
     world.setRoute(route)
+    world.setSky(daily.sky)
     world.setAircraft(spec, liveryOf(spec.id))
     world.setGhosts(ghosts.map((ghost, i) => ({ ghost, spec: aircraftById(ghost.aircraftId), color: GHOST_COLORS[i % GHOST_COLORS.length]!, showTrail: true })))
 
     screens.hide()
     hud.setVisible(true)
     audio.setScene('flight')
-    const session = createFlightSession({ daily, route, spec, weather, pilot: progress.pilot, ghosts })
+    // Racing a friend puts their run on today's local boards (dedupe is the store's job).
+    if (friendGhost) store.submit(friendEntries(friendGhost, ghostCodec.encode(friendGhost)))
+    const session = createFlightSession({ daily, route, spec, weather, pilot: settings.pilotName, ghosts })
     // Start hands-off in trim: the aircraft's trimmed throttle, not whatever the last flight left.
     input.resetForFlight(session.state().throttle)
     if (import.meta.env.DEV) (window as unknown as { __wr: unknown }).__wr = { session, world, flow }
@@ -224,6 +253,7 @@ export function startApp(root: HTMLElement): void {
       routeId: route.id,
       aircraftId: spec.id,
       ghostCode: outcome.ghostCode,
+      pilot: settings.pilotName,
     })
     persist(recorded.progress)
     store.submit(recorded.entries)
@@ -295,7 +325,7 @@ export function startApp(root: HTMLElement): void {
   const shared = decodeGhost(location.hash || null)
   if (shared) history.replaceState(null, '', location.search)
   showTitle()
-  if (shared) fly(shared.routeId, progress.unlockedAircraft.includes(shared.aircraftId) ? shared.aircraftId : progress.unlockedAircraft[0]!, shared)
+  if (shared) fly(shared.routeId, raceAircraft(shared), shared)
   else if (import.meta.env.DEV) debugDeepLink()
   requestAnimationFrame(loop)
 
