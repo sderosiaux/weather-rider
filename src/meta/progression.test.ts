@@ -67,34 +67,34 @@ describe('recordFlight', () => {
     expect(fly(newProgress('Ada'), score('crashed', { smooth: 500 })).entries).toEqual([])
   })
 
-  it('grinding flights without skill stalls after narrow body', () => {
-    const p = flyN(newProgress('Grinder'), 100, score('arrived', { smooth: 200, speed: 200, eco: 200 }))
+  it('flying blind (boards ≤ 1000) stalls after narrow body: the wide body asks for weather-read speed', () => {
+    const p = flyN(newProgress('Grinder'), 100, score('arrived', { smooth: 700, speed: 700, eco: 700 }))
     expect(p.unlockedAircraft).toEqual(['turboprop', 'regional'])
-    const q = flyN(newProgress('Grinder'), 100, score('arrived', { smooth: 300, speed: 300, eco: 300 }))
+    const q = flyN(newProgress('Grinder'), 100, score('arrived', { smooth: 1000, speed: 1000, eco: 1000 }))
     expect(q.unlockedAircraft).toEqual(['turboprop', 'regional', 'narrowbody'])
   })
 
-  it('experimental needs ≥ 750 on all three boards', () => {
-    const almost = flyN(newProgress('Ace'), 30, score('arrived', { smooth: 900, speed: 900, eco: 740 }))
+  it('experimental needs smooth 1050, speed 1150 and eco 1200', () => {
+    const almost = flyN(newProgress('Ace'), 30, score('arrived', { smooth: 1300, speed: 1300, eco: 1190 }))
     expect(almost.unlockedAircraft).not.toContain('experimental')
     expect(almost.unlockedAircraft).toContain('supersonic')
-    const r = fly(almost, score('arrived', { eco: 760 }))
+    const r = fly(almost, score('arrived', { eco: 1210 }))
     expect(r.newlyUnlocked).toEqual(['experimental'])
     expect(r.progress.unlockedAircraft).toEqual([...AIRCRAFT_ORDER])
   })
 
   it('unlocks strictly in order, several at once when earned', () => {
     // A great first run still doesn't skip the flight counts…
-    const first = fly(newProgress('Ace'), score('arrived', { smooth: 900, speed: 900, eco: 900 }))
+    const first = fly(newProgress('Ace'), score('arrived', { smooth: 1300, speed: 1300, eco: 1300 }))
     expect(first.progress.unlockedAircraft).toEqual(['turboprop'])
     // …and once flights catch up, the chain unlocks in AIRCRAFT_ORDER.
-    const p = flyN(first.progress, 13, score('arrived', { smooth: 900, speed: 900, eco: 900 }))
+    const p = flyN(first.progress, 13, score('arrived', { smooth: 1300, speed: 1300, eco: 1300 }))
     expect(p.unlockedAircraft).toEqual(AIRCRAFT_ORDER.slice(0, 7 - 1))
   })
 
   it('reports upgrade unlocks by flights and by score', () => {
     const p = flyN(newProgress('Ada'), 1, score('arrived'))
-    const r = fly(p, score('arrived', { smooth: 350 }))
+    const r = fly(p, score('arrived', { smooth: 1160 }))
     expect(r.newlyUnlocked).toEqual(expect.arrayContaining(['regional', 'wings-winglets', 'inst-gmeter']))
     expect(r.progress.unlockedUpgrades).toContain('wings-winglets')
   })

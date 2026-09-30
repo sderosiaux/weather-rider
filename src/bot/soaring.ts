@@ -71,7 +71,7 @@ export const ECO: SoaringProfile = {
   minClimbRate: 2.5,
   bankEnergy: true,
   maxDetour: 15_000,
-  timeBudget: 1.2,
+  timeBudget: 1.15,
   speed: 'range',
   ride: true,
   liftThrottle: 0,
@@ -132,7 +132,8 @@ export function createSoaringGuidance(
   const P: SoaringProfile = { ...(strategy === 'surfer' ? SURFER : ECO), ...overrides }
   const perf = performanceOf(spec)
   const ref = scoreReference(spec, route)
-  const deadline = ref.timeS * P.timeBudget
+  // Eco flies against its own timetable (best-range time), the others against cruise time.
+  const deadline = (strategy === 'eco' ? ref.ecoTimeS : ref.timeS) * P.timeBudget
   const sample: MutableWeatherSample = { wind: { x: 0, y: 0, z: 0 }, turbulence: 0, dominant: null, cloud: 0 }
   const hMax = Math.min(spec.serviceCeilingM * 0.92, 12_500)
   const lineZ = (x: number): number => route.start.z + ((route.gate.z - route.start.z) * (x - route.start.x)) / Math.max(route.gate.x - route.start.x, 1)
@@ -177,7 +178,7 @@ export function createSoaringGuidance(
   const cost = (o: AltitudeOption): number =>
     !o.feasible || o.timeS > deadline * 0.95
       ? Infinity
-      : (P.timeWeight * o.timeS) / ref.timeS + (P.fuelWeight * o.fuelKg) / ref.fuelKg + 3 * Math.max(0, o.turbulence - 0.2)
+      : (P.timeWeight * o.timeS) / ref.timeS + (P.fuelWeight * o.fuelKg) / ref.ecoFuelKg + 3 * Math.max(0, o.turbulence - 0.2)
   const highestJet = jetOptions.map((c) => c.jet).sort((a, b) => (jetCoreAt(b, midX)?.y ?? 0) - (jetCoreAt(a, midX)?.y ?? 0))[0] ?? null
   let jet: Jet | null = null
   let cruiseAltitude: number

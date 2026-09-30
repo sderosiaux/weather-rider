@@ -66,7 +66,13 @@ const GUST_YAW = 0.06
 /** Stress per second when |g| sits at the structural limit. Starts at 70% of it. */
 const G_STRESS_RATE = 0.08
 const G_STRESS_ONSET = 0.7
-const TURBULENCE_STRESS_RATE = 0.0006
+/**
+ * Fatigue per second in severe turbulence at TURBULENCE_REF_SPEED. Gust loads grow with airspeed, so the rate scales
+ * with V: every airframe pays about the same for crossing the same storm core (slow ones stay in it longer).
+ * Tuned by the balance lab: a straight pass through an extreme core costs 10–30 %.
+ */
+const TURBULENCE_STRESS_RATE = 0.0024
+const TURBULENCE_REF_SPEED = 222
 const INSTANT_FAILURE_FACTOR = 1.5
 /** Diving beyond the fastest level-flight dynamic pressure loads the airframe too. */
 const OVERSPEED_STRESS_RATE = 0.1
@@ -155,7 +161,8 @@ export function step(
   const throttleCmd = clamp(controls.throttle, 0, 1)
   const throttleStep = THROTTLE_RATE * dt
   const throttle = clamp(throttleCmd, state.throttle - throttleStep, state.throttle + throttleStep)
-  const fuelKg = Math.max(0, state.fuelKg - spec.fuelBurnFullKgS * throttle * dt)
+  // Fuel flow follows delivered thrust: thin air takes less fuel for the same throttle.
+  const fuelKg = Math.max(0, state.fuelKg - spec.fuelBurnFullKgS * throttle * thrustLapse(state.pos.y) * dt)
   const mass = currentMass(spec, state.fuelKg)
   const weight = mass * GRAVITY
 
@@ -233,7 +240,10 @@ export function step(
   const overG = Math.max(0, (gLoad / limit - G_STRESS_ONSET) / (1 - G_STRESS_ONSET))
   const turbulenceStress =
     turbulence > SEVERE_TURBULENCE
-      ? TURBULENCE_STRESS_RATE * spec.gustSensitivity * (1 + (2 * (turbulence - SEVERE_TURBULENCE)) / (1 - SEVERE_TURBULENCE))
+      ? TURBULENCE_STRESS_RATE *
+        spec.gustSensitivity *
+        (V / TURBULENCE_REF_SPEED) *
+        (1 + (2 * (turbulence - SEVERE_TURBULENCE)) / (1 - SEVERE_TURBULENCE))
       : 0
   const overspeed = Math.max(0, Math.sqrt(qDyn / aero.maxSpeedQ) - 1) / OVERSPEED_MARGIN
   const stress = Math.min(

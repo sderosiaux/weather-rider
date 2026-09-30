@@ -10,6 +10,6 @@ describe('unlockHints', () => {
   })
   it('names the missing board score', () => {
     const p = { ...newProgress('ada'), flights: 5, unlockedAircraft: ['turboprop', 'regional'] }
-    expect(unlockHints(p).narrowbody).toBe('Smooth 250')
+    expect(unlockHints(p).narrowbody).toBe('Smooth 800')
   })
 })

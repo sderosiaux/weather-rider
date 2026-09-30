@@ -13,8 +13,8 @@ export function dailyNumber(now: Date): number {
 }
 
 /** Game length of a route: log-mapped from the real distance so short hops and ultra-longhauls both fit SPEC §10's 80–160 km. */
-const GAME_LEN_MIN_M = 80_000
-const GAME_LEN_MAX_M = 160_000
+const GAME_LEN_MIN_M = 95_000
+const GAME_LEN_MAX_M = 145_000
 const REAL_KM_SHORT = 1_500
 const REAL_KM_LONG = 15_000
 
@@ -24,7 +24,7 @@ const REAL_KM_LONG = 15_000
  * timeScale = realBlockTimeS / (gameDistanceM / REF_GAME_CRUISE_MS): a pilot flying straight at the reference cruise
  * sees roughly the real-world flight time; faster aircraft or a jet stream beat it, a turboprop won't.
  */
-const REF_GAME_CRUISE_MS = GAME_LEN_MIN_M / 360
+const REF_GAME_CRUISE_MS = 80_000 / 360
 const REAL_CRUISE_KMH = 850
 const REAL_OVERHEAD_S = 1_800
 
