@@ -32,24 +32,29 @@ g) surfer vs direct speed board, mod+ext: median 18.3%   (want ≥+10%)
 <!-- findings:start -->
 ## Findings
 
-### Wave 3: current tuning (balance-loop.md #1–25)
+### Wave 3: current tuning (balance-loop.md #1–36)
 
-The promise holds on the real models. Surfer vs direct: −16.5 % time and −18 % fuel (median, all tiers), faster in 91 % of pairs, cheaper in 96 %. On boards normalised per aircraft (1000 = the aircraft flown well without reading the sky), the best weather-aware pilot beats the best blind one on speed in 83 % of moderate+extreme pairs (+12.7 %), on eco in 96 % (+32.5 %), on smooth in 97 % of extreme pairs. Surfer vs direct on the speed board: +20 % (median, moderate+extreme).
+Final criteria line:
 
-What does it, by module:
-- weather: a low jet (core 4–5.5 km, 2.2× speed) runs 8–12 km beside the straight line with little meander, so riding it is a sideways decision that doesn't cost a 150 km climb. Moderate routes (from severity 0.35) get a storm beside the line, extreme ones a core on it; calm stays clear.
-- flight: fuel flow follows delivered thrust (throttle · lapse). Tanks are sized so a direct flight lands with ~17 %. Turbulence fatigue grows with airspeed, so every airframe pays about the same for a core. maxSpeed/cruise is ≈ 1.14 everywhere. The turboprop cruises at 205 m/s and the supersonic at 265 m/s, so their flights last 6–12 minutes.
-- scoring: each board is referenced on the aircraft's analytic blind flight (full throttle straight line, best-range straight line at its best altitude, trimmed direct in the route's background air). The weather's gain is put on a shared footing (speed ratio^((V_full/222)^1.05), eco 1000·(1 + (V_range/222)^0.55 · ln ratio), smooth relative to the airframe's own reference). Eco is log-scaled with a timetable. Comfort ignores steady g (5 s high-pass). Weather utilization now reads direct 5 %, surfer 32 %, eco 53 %.
-- meta: routes 95–145 km. Aircraft unlocks: narrowbody smooth 800, widebody speed 1050, cargo eco 1100, supersonic speed 1150, experimental smooth 1050 / speed 1150 / eco 1200. Upgrade score unlocks sit at 1050–1500. Blind players stall after the narrowbody, a surfer-only player after the widebody, a player who picks the style per board unlocks everything by flight 20. Upgrades come about one per flight.
-- bot (weaknesses fixed, not tuning): the planner evaluates every jet, and jet riders leave the jet in time to line up for the gate.
+```
+speed 85% +10.8% calm 94% | eco 97% +30.8% | smooth-ext 97% +143% | direct fuel 20% (reckless empties the tank 5×, direct/reckless never > 45 %)
+weather utilization surfer 30 % | surfer vs direct speed board +18 % | board leaders smooth narrowbody 36 %, speed regional 52 %, eco supersonic 43 %
+unlock: weather-aware (style per board) 2/4/14/15/15/20 · blind stalls at the wide body | stress through an extreme core: direct p50 11 %, dodging max 17 %
+direct minutes (median): turboprop 13.2, regional 9.8, narrowbody 8.9, widebody 8.1, cargo 8.5, supersonic 5.2, experimental 13.6 | gate misses 0 | no loadout beats stock on all three boards
+```
 
-Per-route board leaders: smooth narrowbody 45 %, speed supersonic 48 %, eco supersonic 48 % (was 100/100/74 %).
+The design, module by module:
+- weather: a low jet (core 4–5.5 km, up to 150 m/s) runs 8–12 km beside the straight line, barely meanders, and fades out 16–6 km before the gate. Riding it is a sideways decision that costs no big climb. Moderate routes (from severity 0.35) get a storm beside the line, extreme ones a core on it; calm stays clear. The low-level wind is a light easterly.
+- flight: fuel flow follows delivered thrust. Tanks are sized so a straight flight lands with 20 %. Turbulence fatigue scales with airspeed. maxSpeed/cruise ≈ 1.14 for every airframe. Cruise speeds keep each aircraft's character: the turboprop and the glider are slow (150 / 145 m/s, ≤ 14 min), the supersonic is fast (380 m/s, ≥ 4 min).
+- scoring: each board is referenced on the stock airframe's blind flight (full throttle straight line / best range at its best altitude / trimmed direct in the route's background air). A blind flight scores 1000; hangar mods and the weather move it. The weather's gain is put on a shared footing across aircraft ((V/222)^0.62 on speed, ^0.55 on eco); without it the slow airframes own speed and eco. Eco is log-scaled with a timetable. Comfort ignores steady g.
+- meta: routes 90–140 km. Unlocks follow each aircraft's character (widebody smooth 1300, cargo eco 1250, supersonic speed 1150, experimental 1300/1150/1300). Upgrade score rules sit above the blind level, and about one unlock comes per flight.
+- bot: the planner evaluates every jet. Jet riders line up for the gate using the turn geometry and stop dodging on the line-up. No lift riding or full throttle near the gate. Glides never zoom. There are 0 gate misses in 2,352 flights.
 
-Still open:
-- The experimental takes 13.8–19.7 minutes on a direct flight. Making it fast (≥ 200 m/s) breaks flight.test's "fixture updraft lifts the experimental ≥ 500 m" (434 m at 200 m/s): the glider identity and the 6–12 min rule can't both hold.
-- A direct pass through an extreme core costs a median 8.6 % stress (max 23 %; turboprop/experimental 11–12 %, widebody/cargo 4–5 %). flight.test caps the turboprop at < 60 % after 60 s in uniform severe air, which caps the rate; low-gust airframes stay under 10 %.
-- 3 % of arrivals keep > 60 % fuel: eco flights that read the sky well.
-- Riding the jet costs comfort in its shear layers, so on calm days the smooth board still favours flying straight.
+Trades left on the table:
+- The glider and the turboprop fly 13–14 minutes (median) on direct flights (max 15.2), because their slowness is their identity.
+- Riding the jet costs comfort in its shear layers, so smooth and speed pull in opposite directions on calm days (intended).
+- A pure-style player (surfer-only, eco-only) stalls: the late aircraft ask for the board that matches their character.
+- The speed-board leader moves between regional and experimental with small leverage changes (medians within ~8 %), so rerun `pnpm lab` after any spec change.
 
 ### Wave 2 snapshot (before tuning)
 
