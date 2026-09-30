@@ -1,11 +1,12 @@
 // App shell: title → flight → results, hangar. Owns persistence and wiring, no game rules.
-import type { AircraftSpec, AircraftState, Ghost, PlayerProgress } from '../core/types'
+import type { AircraftSpec, AircraftState, PlayerProgress } from '../core/types'
 import { AIRCRAFT, aircraftById } from '../flight'
 import { createFlowLayer } from '../flow'
 import {
   UPGRADES,
   applyLoadout,
   createStore,
+  dailyNumber,
   dailyWeather,
   dailyWeatherFor,
   equip,
@@ -24,6 +25,8 @@ import { ghostCodec } from '../scoring'
 import { createHud, createInput, createScreens } from '../ui'
 import { createWeather } from '../weather'
 import { friendEntries, sanitizePilotName } from './friendEntries'
+import { admitGhost, type RaceGhost } from './ghostGate'
+import { safeStorage } from './safeStorage'
 import { createFlightSession, type FlightSession } from './session'
 
 const GHOST_COLORS = ['#f4b860', '#8ec5ff', '#c9a7ff']
@@ -43,7 +46,8 @@ export function startApp(root: HTMLElement): void {
   overlay.className = 'overlay'
   root.append(canvas, overlay)
 
-  const store = createStore(localStorage)
+  const { storage } = safeStorage()
+  const store = createStore(storage)
   let progress: PlayerProgress = store.loadProgress()
   const today = dailyWeather(new Date())
 
@@ -63,7 +67,7 @@ export function startApp(root: HTMLElement): void {
   const SETTINGS_KEY = 'weather-rider/settings'
   const loadSettings = (): Settings => {
     try {
-      const raw = localStorage.getItem(SETTINGS_KEY)
+      const raw = storage.getItem(SETTINGS_KEY)
       const parsed = raw ? (JSON.parse(raw) as Partial<Settings>) : {}
       return {
         invertPitch: typeof parsed.invertPitch === 'boolean' ? parsed.invertPitch : DEFAULT_SETTINGS.invertPitch,
@@ -87,24 +91,31 @@ export function startApp(root: HTMLElement): void {
 
   const persist = (p: PlayerProgress): void => {
     progress = p
-    store.saveProgress(p)
+    if (!store.saveProgress(p)) console.warn('Progress not saved (storage full or unavailable)')
   }
 
   const liveryOf = (id: string): string => progress.livery[id] ?? '#f5f1ea'
   const specFor = (id: string): AircraftSpec => applyLoadout(aircraftById(id), progress.loadouts[id] ?? [])
 
   /** Race a ghost in its own aircraft when you have it, else in your first one. */
-  const raceAircraft = (ghost: Ghost): string =>
-    progress.unlockedAircraft.includes(ghost.aircraftId) ? ghost.aircraftId : progress.unlockedAircraft[0] ?? AIRCRAFT[0]!.id
+  const raceAircraft = (race: RaceGhost): string =>
+    progress.unlockedAircraft.includes(race.ghost.aircraftId) ? race.ghost.aircraftId : progress.unlockedAircraft[0] ?? AIRCRAFT[0]!.id
 
-  const decodeGhost = (code: string | null): Ghost | null => {
-    if (!code) return null
+  /** Untrusted text (URL hash, pasted link, stored board entry) → a raceable ghost, or null. Never throws. */
+  const readGhost = (text: string | null): RaceGhost | null => {
+    if (!text) return null
     try {
-      return ghostCodec.decode(parseShareHash(code) ?? code)
+      const code = parseShareHash(text) ?? text
+      const verdict = admitGhost(
+        { ghost: ghostCodec.decode(code), code },
+        { today: dailyNumber(new Date()), aircraftIds: AIRCRAFT.map((a) => a.id), dailyFor: dailyWeatherFor },
+      )
+      if (verdict.ok) return verdict.race
+      console.warn('Ignoring ghost:', verdict.reason)
     } catch (err) {
       console.warn('Ignoring invalid ghost code', err)
-      return null
     }
+    return null
   }
 
   let mode: Mode
@@ -137,7 +148,10 @@ export function startApp(root: HTMLElement): void {
     audio.setScene('menu')
     startDemo()
     screens.showTitle(today, progress, AIRCRAFT, unlockHints(progress), {
-      onFly: (routeId, aircraftId, ghostCode) => fly(routeId, aircraftId, decodeGhost(ghostCode)),
+      onFly: (routeId, aircraftId, ghostCode) => {
+        const race = readGhost(ghostCode)
+        fly(race ? race.ghost.routeId : routeId, race ? raceAircraft(race) : aircraftId, race)
+      },
       onHangar: showHangar,
       onSettings: showSettings,
       onBoards: showBoards,
@@ -154,8 +168,8 @@ export function startApp(root: HTMLElement): void {
     const model: BoardsModel = { daily: today, pilot: settings.pilotName, boards }
     screens.showBoards(model, {
       onRace: (entry) => {
-        const ghost = decodeGhost(entry.ghost)
-        if (ghost) fly(ghost.routeId, raceAircraft(ghost), ghost)
+        const race = readGhost(entry.ghost)
+        if (race) fly(race.ghost.routeId, raceAircraft(race), race)
       },
       onBack: showTitle,
     })
@@ -168,7 +182,7 @@ export function startApp(root: HTMLElement): void {
         settings = next
         applySettings(next)
         try {
-          localStorage.setItem(SETTINGS_KEY, JSON.stringify(next))
+          storage.setItem(SETTINGS_KEY, JSON.stringify(next))
         } catch (err) {
           console.warn('Settings not saved', err)
         }
@@ -212,17 +226,21 @@ export function startApp(root: HTMLElement): void {
     })
   }
 
-  /** A friend's ghost carries its own day: fly that day's sky and route so the race is fair. */
-  const fly = (routeId: string, aircraftId: string, friendGhost: Ghost | null, dev?: { autopilot: Strategy | null; timeScale: number }): void => {
+  /**
+   * A friend's ghost carries its own day: fly that day's sky and route so the race is fair.
+   * `race` must come from readGhost (validated); ids from the UI are trusted catalog ids.
+   */
+  const fly = (routeId: string, aircraftId: string, race: RaceGhost | null, dev?: { autopilot: Strategy | null; timeScale: number }): void => {
+    const friendGhost = race?.ghost ?? null
     const daily = friendGhost ? dailyWeatherFor(friendGhost.dailyNumber) : today
     const route = daily.routes.find((r) => r.id === (friendGhost?.routeId ?? routeId))
     if (!route) throw new Error(`Route ${routeId} not found in WORLD WEATHER #${daily.number}`)
     const spec = specFor(aircraftId)
     const weather = createWeather(weatherParamsFor(daily, route))
     const localCode = store.bestGhost(daily.number, route.id, 'speed')
-    // Racing your own shared link: the friend ghost and the local best are the same flight.
-    const localBest = localCode && (!friendGhost || ghostCodec.encode(friendGhost) !== localCode) ? decodeGhost(localCode) : null
-    const ghosts = [friendGhost, localBest].filter((g): g is Ghost => g !== null)
+    // Racing your own shared link: the friend ghost and the local best are the same flight (same code).
+    const localBest = localCode && localCode !== race?.code ? readGhost(localCode) : null
+    const ghosts = [race, localBest].filter((g): g is RaceGhost => g !== null).map((g) => g.ghost)
 
     world.setWeather(weather)
     flow.setWeather(weather)
@@ -234,9 +252,11 @@ export function startApp(root: HTMLElement): void {
     screens.hide()
     hud.setVisible(true)
     audio.setScene('flight')
-    // Racing a friend puts their run on today's local boards (dedupe is the store's job).
-    if (friendGhost) store.submit(friendEntries(friendGhost, ghostCodec.encode(friendGhost)))
+    // Racing a friend puts their run on today's local boards (dedupe is the store's job). Use the code it
+    // arrived as: re-encoding a decoded ghost can fail and isn't its identity.
+    if (race) store.submit(friendEntries(race.ghost, race.code))
     const session = createFlightSession({ daily, route, spec, weather, pilot: settings.pilotName, ghosts })
+    if (race) races.set(session, race)
     // Start hands-off in trim: the aircraft's trimmed throttle, not whatever the last flight left.
     input.resetForFlight(session.state().throttle)
     if (import.meta.env.DEV) (window as unknown as { __wr: unknown }).__wr = { session, world, flow }
@@ -266,9 +286,13 @@ export function startApp(root: HTMLElement): void {
     mode = { kind: 'results', backdrop: session.state() }
     screens.showResults(
       { score: outcome.score, route, dailyNumber: daily.number, aircraft: spec, ghostCode: outcome.ghostCode, previousBest, newlyUnlocked: recorded.newlyUnlocked.map(describeUnlock) },
-      { onRetry: () => fly(route.id, spec.id, session.setup.ghosts[0] ?? null), onMenu: showTitle },
+      { onRetry: () => fly(route.id, spec.id, raceOf(session)), onMenu: showTitle },
     )
   }
+
+  /** Retry races the same friend again: keep the validated race that started this flight. */
+  const races = new WeakMap<FlightSession, RaceGhost>()
+  const raceOf = (session: FlightSession): RaceGhost | null => races.get(session) ?? null
 
   const resize = (): void => world.resize(root.clientWidth, root.clientHeight)
   window.addEventListener('resize', resize)
@@ -280,7 +304,22 @@ export function startApp(root: HTMLElement): void {
 
   let last = performance.now()
   let titleT = 0
+  let lastErrorLog = -Infinity
+  /** One bad frame (hostile ghost, render bug) must never stop the game: the loop reschedules first. */
   const loop = (now: number): void => {
+    requestAnimationFrame(loop)
+    try {
+      frame(now)
+    } catch (err) {
+      if (now - lastErrorLog > 5000) {
+        console.error('Frame failed', err)
+        lastErrorLog = now
+      }
+      // A failing flight goes back to the title rather than freezing mid-air.
+      if (mode.kind === 'flying') showTitle()
+    }
+  }
+  const frame = (now: number): void => {
     const dtReal = Math.min((now - last) / 1000, 0.1)
     last = now
     if (mode.kind === 'flying') {
@@ -319,15 +358,21 @@ export function startApp(root: HTMLElement): void {
       flow.update(world.camera, mode.backdrop.t + titleT, dtReal)
     }
     world.render()
-    requestAnimationFrame(loop)
   }
 
-  const shared = decodeGhost(location.hash || null)
-  if (shared) history.replaceState(null, '', location.search)
+  // A share link is consumed once: strip it so a reload doesn't replay it (valid or hostile).
+  const shareText = location.hash && parseShareHash(location.hash) ? location.hash : null
+  if (shareText) history.replaceState(null, '', location.pathname + location.search)
+  const shared = readGhost(shareText)
   showTitle()
-  if (shared) fly(shared.routeId, raceAircraft(shared), shared)
-  else if (import.meta.env.DEV) debugDeepLink()
   requestAnimationFrame(loop)
+  try {
+    if (shared) fly(shared.ghost.routeId, raceAircraft(shared), shared)
+    else if (import.meta.env.DEV) debugDeepLink()
+  } catch (err) {
+    console.error('Could not start the shared flight', err)
+    showTitle()
+  }
 
   /**
    * Dev-only deep link so agents/screenshots reach real in-game states without menus:

@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lab": "vitest run --config vitest.lab.config.ts",
-    "bench": "vitest bench --run --reporter=verbose"
+    "bench": "vitest bench --run --reporter=verbose",
+    "e2e": "node e2e/run.mjs"
   },
   "dependencies": {
     "three": "^0.186.1"
