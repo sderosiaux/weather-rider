@@ -251,7 +251,7 @@ export const renderHangar = (model: HangarModel, cb: HangarCallbacks, memory: Ha
     { class: 'wr-screen wr-hangar', 'aria-label': 'Hangar', 'data-screen': 'hangar' },
     h('header', 'wr-hangar__header', h('h1', 'wr-hangar__title', 'Hangar'), back),
     caption,
-    h('aside', { class: 'wr-sheet wr-hangar__panel', 'data-keep-scroll': '' }, h('h2', 'wr-sheet__title', 'Your aircraft'), gallery, detail),
+    h('aside', { class: 'wr-sheet wr-hangar__panel', 'data-keep-scroll': '', 'data-hangar-panel': '' }, h('h2', 'wr-sheet__title', 'Your aircraft'), gallery, detail),
   )
   render()
   // Every show (open, or re-show after an equip/livery change) re-frames the showcase with current data.
