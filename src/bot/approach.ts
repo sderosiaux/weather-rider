@@ -39,9 +39,14 @@ export function approachAltitude(
  * the window, then turn in. The circle is 2.2 turn radii wide so the final turn can reach the centre.
  * Sticky: once engaged it never hands back to the en-route guidance. Returns null when not engaged.
  */
-export function createGateHold(spec: AircraftSpec, route: Route): (state: AircraftState, gateAlt: number) => Intent | null {
+export function createGateHold(
+  spec: AircraftSpec,
+  route: Route,
+  trace?: (t: number, event: string) => void,
+): (state: AircraftState, gateAlt: number) => Intent | null {
   let phase: 'free' | 'hold' | 'final' = 'free'
   return (state, gateAlt) => {
+    const before = phase
     const d = horizontalDistance(state.pos, route.gate)
     const h = state.pos.y
     const inWindow = h > route.gateMinAlt + 30 && h < route.gateMaxAlt - 30
@@ -50,13 +55,28 @@ export function createGateHold(spec: AircraftSpec, route: Route): (state: Aircra
     const radius = Math.max(route.gateRadius * 0.6, 2.2 * turnRadius(slow + 10, 30 * DEG))
     const offBearing = Math.abs(wrapAngle(bearingTo(state.pos, route.gate) - trackOf(state.vel)))
     const missing = d < 1.2 * turnRadius(state.airspeed, 25 * DEG) + route.gateRadius && offBearing > 70 * DEG
-    if (phase === 'free' && ((!inWindow && d < radius + route.gateRadius * 1.5) || missing)) phase = 'hold'
+    // Out of the window near the gate: only hold if a normal 8 % descent/climb can't fix it before the cylinder.
+    const need = Math.max(h - (route.gateMaxAlt - 200), route.gateMinAlt + 200 - h, 0)
+    const fixable = need <= Math.max(0, d - route.gateRadius) * 0.08
+    if (phase === 'free' && ((!inWindow && !fixable && d < radius + route.gateRadius * 1.5) || missing)) phase = 'hold'
     else if (phase === 'hold' && settled) phase = 'final'
     else if (phase === 'final' && !inWindow) phase = 'hold'
+    if (phase !== before) trace?.(state.t, `gate ${phase} d=${d.toFixed(0)} h=${h.toFixed(0)}`)
     if (phase === 'free') return null
     const vertical = { kind: 'altitude', target: gateAlt, maxClimb: 15, maxSink: 25, tau: 10 } as const
     if (phase === 'final') {
-      return { track: bearingTo(state.pos, route.gate), maxBank: 35 * DEG, vertical, speed: slow, minThrottle: 0, maxThrottle: 1 }
+      // The gate inside our turning circle can't be reached by turning toward it: fly straight on until it
+      // leaves the circle, then turn in (a teardrop, flown by geometry rather than by angle).
+      const toGate = bearingTo(state.pos, route.gate)
+      const track = trackOf(state.vel)
+      const turn = turnRadius(Math.max(Math.hypot(state.vel.x, state.vel.z), slow), 35 * DEG)
+      const side = wrapAngle(toGate - track) > 0 ? 1 : -1
+      // Centre of the turning circle on the gate's side (heading angles: +90° = left of track).
+      const ca = track + (side * Math.PI) / 2
+      const cx = state.pos.x + turn * Math.cos(ca)
+      const cz = state.pos.z - turn * Math.sin(ca)
+      const outbound = Math.hypot(route.gate.x - cx, route.gate.z - cz) < turn * 0.95
+      return { track: outbound ? track : toGate, maxBank: 35 * DEG, vertical, speed: slow, minThrottle: 0, maxThrottle: 1 }
     }
     const groundSpeed = Math.hypot(state.vel.x, state.vel.z)
     return {

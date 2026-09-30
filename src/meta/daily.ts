@@ -13,8 +13,8 @@ export function dailyNumber(now: Date): number {
 }
 
 /** Game length of a route: log-mapped from the real distance so short hops and ultra-longhauls both fit SPEC §10's 80–160 km. */
-const GAME_LEN_MIN_M = 95_000
-const GAME_LEN_MAX_M = 145_000
+const GAME_LEN_MIN_M = 90_000
+const GAME_LEN_MAX_M = 140_000
 const REAL_KM_SHORT = 1_500
 const REAL_KM_LONG = 15_000
 

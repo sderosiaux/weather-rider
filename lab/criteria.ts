@@ -1,6 +1,6 @@
 // Wave-3 balance criteria (brief from the architect), computed from the lab rows. One source for the
 // console summary, the report section and the balance-loop log.
-import { AIRCRAFT_ORDER, type Board } from '../src/meta'
+import { AIRCRAFT_ORDER, AIRCRAFT_UNLOCKS, type Board } from '../src/meta'
 import { PILOTS, type FlightRow } from './matrix'
 import { bestOf, median, quantile, simulateUnlocks } from './report'
 
@@ -48,7 +48,8 @@ export function criteriaSummary(rows: readonly FlightRow[]): Criteria {
   const directFuelByAc = AIRCRAFT_ORDER.map((a) => median(direct.filter((r) => r.aircraft === a).map((r) => r.fuelRemainingPct)))
   const recklessDry = rows.filter((r) => r.pilot === 'reckless' && r.tier === 'extreme' && (r.outcome === 'fuel' || r.fuelRemainingPct < 0.5)).length
   const arrived = rows.filter((r) => r.outcome === 'arrived')
-  const over60 = arrived.filter((r) => r.fuelRemainingPct > 60).length / Math.max(arrived.length, 1)
+  const naiveOver45 = arrived.filter((r) => (r.pilot === 'direct' || r.pilot === 'reckless') && r.fuelRemainingPct > 45).length
+  const ecoNaiveLeft = quantile(arrived.filter((r) => r.pilot === 'eco-naive').map((r) => r.fuelRemainingPct), 0.9)
   const surferWu = median(rows.filter((r) => r.pilot === 'surfer' && r.outcome === 'arrived').map((r) => r.weatherUtilization))
   const dominance = (['smooth', 'speed', 'eco'] as const).map((b) => {
     const best = new Map<string, FlightRow>()
@@ -63,8 +64,15 @@ export function criteriaSummary(rows: readonly FlightRow[]): Criteria {
     return `${b} ${top} ${pc(n / Math.max(best.size, 1))}`
   })
   const days = [...new Set(rows.map((r) => r.day))].sort((a, b) => a - b)
-  const unlocks = simulateUnlocks(rows, days, 'surfer', () => 'surfer')
-  const unlockLine = AIRCRAFT_ORDER.map((id) => unlocks.at[id] ?? '—').join('/')
+  const style = { smooth: 'surfer-smooth', speed: 'surfer-fast', eco: 'eco' } as const
+  const blind = { smooth: 'direct', speed: 'reckless', eco: 'eco-naive' } as const
+  const perBoard = (st: Record<Board, string>) => (next: string | null, flight: number): string => {
+    const need = next ? (Object.keys(AIRCRAFT_UNLOCKS[next as keyof typeof AIRCRAFT_UNLOCKS].best) as Board[]) : []
+    return need.length ? st[need[flight % need.length]!] : st.speed
+  }
+  const unlocks = simulateUnlocks(rows, days, 'savvy', perBoard(style))
+  const blindUnlocks = simulateUnlocks(rows, days, 'blind', perBoard(blind))
+  const unlockLine = `savvy ${AIRCRAFT_ORDER.map((id) => unlocks.at[id] ?? '—').join('/')} blind ${AIRCRAFT_ORDER.map((id) => blindUnlocks.at[id] ?? '—').join('/')}`
   const minutes = direct.map((r) => r.simTimeS / 60)
   // g) surfer vs direct on the speed board, paired, moderate+extreme.
   const byKey = new Map<string, FlightRow>()
@@ -78,20 +86,20 @@ export function criteriaSummary(rows: readonly FlightRow[]): Criteria {
   const gMedian = median(gDeltas)
   const minutesBy = AIRCRAFT_ORDER.map((a) => {
     const m = direct.filter((r) => r.aircraft === a).map((r) => r.simTimeS / 60)
-    return `${a.slice(0, 4)} ${f1(Math.min(...m))}–${f1(Math.max(...m))}`
+    return `${a.slice(0, 4)} ${f1(median(m))} (${f1(Math.min(...m))}–${f1(Math.max(...m))})`
   }).join(', ')
   const failures = rows.filter((r) => r.outcome !== 'arrived').length
   const text = [
     `a) speed  mod+ext: ahead ${pc(sp.ahead)} gain ${f1(sp.gainPct)}% | calm: ahead ${pc(spc.ahead)} gain ${f1(spc.gainPct)}%   (want ≥70% & ≥+10% / ≥50%)`,
     `b) eco    mod+ext: ahead ${pc(ec.ahead)} gain ${f1(ec.gainPct)}% | calm: ahead ${pc(ecc.ahead)} gain ${f1(ecc.gainPct)}%   (want ≥70%)`,
     `c) smooth extreme: ahead ${pc(smx.ahead)} gain ${f1(smx.gainPct)}%`,
-    `d) direct fuel left median ${f1(directFuel)}% (by aircraft ${directFuelByAc.map((x) => Math.round(x)).join('/')}); reckless dry on extreme: ${recklessDry}; arrivals >60% fuel: ${pc(over60)}   (want 10–30%, >0, 0%)`,
+    `d) direct fuel left median ${f1(directFuel)}% (by aircraft ${directFuelByAc.map((x) => Math.round(x)).join('/')}); reckless dry on extreme: ${recklessDry}; direct/reckless arrivals >45% fuel: ${naiveOver45}; eco-naive fuel left p90 ${f1(ecoNaiveLeft)}%   (want 10–30%, >0, 0)`,
     `e) surfer weather utilization p50 ${f1(surferWu)}%   (want ≥30%)`,
-    `f) board leaders: ${dominance.join(' · ')}; surfer unlock flights ${unlockLine}; surfer upgrades at flights ${unlocks.upgradeFlights.join(',')}`,
+    `f) board leaders: ${dominance.join(' · ')}; unlock flights ${unlockLine}; savvy upgrades at flights ${unlocks.upgradeFlights.join(',')}`,
     `h) stress on extreme: direct p50/max ${f1(median(rows.filter((r) => r.pilot === 'direct' && r.tier === 'extreme').map((r) => r.stress)))}/${f1(Math.max(...rows.filter((r) => r.pilot === 'direct' && r.tier === 'extreme').map((r) => r.stress)))}%, surfer max ${f1(Math.max(...rows.filter((r) => r.pilot === 'surfer' && r.tier === 'extreme').map((r) => r.stress)))}%, overstressed ${rows.filter((r) => r.outcome === 'overstressed').length}   (want direct 10–30, dodge < 20)`,
     `g) surfer vs direct speed board, mod+ext: median ${f1(gMedian)}%   (want ≥+10%)`,
-    `   direct flight minutes p10/p50/p90 ${f1(quantile(minutes, 0.1))}/${f1(median(minutes))}/${f1(quantile(minutes, 0.9))} (want 6–12); by aircraft ${minutesBy}; failures ${failures}/${rows.length}`,
+    `   direct flight minutes p10/p50/p90 ${f1(quantile(minutes, 0.1))}/${f1(median(minutes))}/${f1(quantile(minutes, 0.9))} (want medians: airliners 8–12, all ≤ 14, supersonic ≥ 4); by aircraft median (range) ${minutesBy}; failures ${failures}/${rows.length}`,
   ].join('\n')
-  const line = `speed ${pc(sp.ahead)} ${f1(sp.gainPct)}% calm ${pc(spc.ahead)} | eco ${pc(ec.ahead)} ${f1(ec.gainPct)}% | smooth-ext ${pc(smx.ahead)} ${f1(smx.gainPct)}% | fuel ${f1(directFuel)}% dry ${recklessDry} >60 ${pc(over60)} | wu ${f1(surferWu)} | g ${f1(gMedian)}% | ${dominance.join(', ')} | unlock ${unlockLine} | min ${f1(median(minutes))} | fail ${failures}`
+  const line = `speed ${pc(sp.ahead)} ${f1(sp.gainPct)}% calm ${pc(spc.ahead)} | eco ${pc(ec.ahead)} ${f1(ec.gainPct)}% | smooth-ext ${pc(smx.ahead)} ${f1(smx.gainPct)}% | fuel ${f1(directFuel)}% dry ${recklessDry} naive>45 ${naiveOver45} | wu ${f1(surferWu)} | g ${f1(gMedian)}% | ${dominance.join(', ')} | unlock ${unlockLine} | stress ext direct p50 ${f1(median(rows.filter((r) => r.pilot === 'direct' && r.tier === 'extreme').map((r) => r.stress)))} surfer max ${f1(Math.max(...rows.filter((r) => r.pilot === 'surfer' && r.tier === 'extreme').map((r) => r.stress)))} | min ${minutesBy} | fail ${failures}`
   return { text, line }
 }

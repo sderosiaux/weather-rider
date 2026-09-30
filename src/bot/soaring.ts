@@ -298,7 +298,7 @@ export function createSoaringGuidance(
     return c / n
   }
 
-  const gateHold = createGateHold(spec, route)
+  const gateHold = createGateHold(spec, route, trace)
   let mode: Mode = { kind: 'cruise' }
   let lastAvoidT = -Infinity
   let offset = 0
@@ -314,11 +314,13 @@ export function createSoaringGuidance(
     const aheadX = Math.min(pos.x + 10_000, route.gate.x)
     // Leave a jet beside the line early enough to come back across: ~3 km of run per km of offset.
     const offLine = Math.abs(pos.z - lineZ(pos.x))
-    const lineUp = Math.max(20_000, 1.5 * finalLeg, 3 * offLine + 8000)
-    const jz = followJet && d > lineUp ? jetLateral(aheadX, jetCoreAt(jet!, aheadX)?.y ?? h) : NaN
+    const lineUp = Math.max(20_000, 1.5 * finalLeg, 3 * offLine + 8000, 2 * Math.sqrt(offLine * turnRadius(state.airspeed, 25 * DEG)) + 10_000)
+    const jetY = jet ? (jetCoreAt(jet, aheadX)?.y ?? h) : h
+    // Steer to the core only once within reach of its altitude (a jet 5 km above is not worth a sideways detour yet).
+    const jz = followJet && d > lineUp && Math.abs(h - jetY) < 2 * (jet?.thickness ?? 0) ? jetLateral(aheadX, jetY) : NaN
     const aim = d > lineUp ? v3(aheadX, 0, Number.isNaN(jz) ? lineZ(aheadX) : jz) : route.gate
     const baseTrack = bearingTo(pos, aim)
-    if (P.avoid && state.t - lastAvoidT >= 1 && d > finalLeg) {
+    if (P.avoid && state.t - lastAvoidT >= 1 && d > lineUp) {
       lastAvoidT = state.t
       let best = offset
       let bestCost = Infinity
@@ -332,7 +334,7 @@ export function createSoaringGuidance(
       }
       offset = best
     }
-    if (d <= finalLeg) offset = 0
+    if (d <= lineUp) offset = 0
     const track = wrapAngle(baseTrack + offset)
 
     const planned = cruiseAltAt(pos.x)
@@ -340,7 +342,10 @@ export function createSoaringGuidance(
     const windX = state.vel.x - state.airspeed * Math.cos(track)
     const windZ = state.vel.z + state.airspeed * Math.sin(track)
     const tailwind = windX * Math.cos(track) - windZ * Math.sin(track)
-    const full = P.speed === 'max'
+    // No lift riding and no full throttle on the approach: rising air or a dying tailwind near the gate only
+    // pushes the aircraft out of the window (a lost 130 m/s tailwind is a 130 m/s airspeed jump).
+    const approaching = d < Math.max(30_000, 2 * lineUp)
+    const full = P.speed === 'max' && d > Math.max(15_000, 0.8 * lineUp)
     let speed = P.speed === 'range' ? perf.rangeSpeed(h, clamp(tailwind, -40, 80)) : full ? perf.cruiseSpeed(h, 1.2) * 1.3 : perf.cruiseSpeed(h)
     // Behind schedule: speed up to make the deadline.
     const remaining = deadline - state.t
@@ -351,7 +356,7 @@ export function createSoaringGuidance(
 
     const base = { track, maxBank: 25 * DEG, speed, minThrottle: full ? 1 : 0, maxThrottle: 1, gLimit: CRUISE_G }
     const descending = target < h - 250
-    if (P.ride && air.windY > 2 && !descending && h < Math.min((P.bankEnergy ? hMax : planned) + 1500, hMax)) {
+    if (P.ride && !approaching && air.windY > 2 && !descending && h < Math.min((P.bankEnergy ? hMax : planned) + 1500, hMax)) {
       // Rising air: stay level relative to the air mass and let it carry us up; the altitude is banked for later.
       return { ...base, vertical: { kind: 'air-path', gamma: 0 } }
     }
@@ -360,8 +365,9 @@ export function createSoaringGuidance(
       const rate = clamp(perf.climb(h).rate * 0.7, 2, 8)
       return { ...base, vertical: { kind: 'altitude', target, maxClimb: rate, maxSink: 8, tau: 25 } }
     }
-    if (P.glideDown && descending && !late) {
-      return { ...base, speed: perf.glideSpeed(h), vertical: { kind: 'speed' }, minThrottle: 0, maxThrottle: 0 }
+    if (P.glideDown && descending && !late && !approaching) {
+      // Gliding down: excess airspeed (leaving a jet, a gust) must not turn into a zoom climb.
+      return { ...base, speed: perf.glideSpeed(h), vertical: { kind: 'speed', maxGamma: 0 }, minThrottle: 0, maxThrottle: 0 }
     }
     if (descending) return { ...base, minThrottle: 0, vertical: { kind: 'altitude', target, maxClimb: 8, maxSink: Math.max(8, descentSlope * speed * 1.2), tau: 25 } }
     const vertical: Vertical = { kind: 'altitude', target, maxClimb: 8, maxSink: Math.max(8, descentSlope * speed * 1.2), tau: 25 }

@@ -62,6 +62,9 @@ export interface JetSpec {
   /** Along-jet streak modulation. */
   readonly ks: number
   readonly ps: number
+  /** The jet fades out between these abscissas (m); the low jet dies before the gate so arrivals stay flyable. */
+  readonly fadeX0: number
+  readonly fadeX1: number
 }
 
 /** Background traffic flying a straight line; its wake trails behind it for `life` seconds. */
@@ -124,6 +127,11 @@ const LOW_JET_OFFSET = 8000
 const LOW_JET_OFFSET_SPAN = 4000
 const LOW_JET_MEANDER = 2500
 const LOW_JET_HALF_WIDTH = 4500
+/** Low jet cap (m/s): faster than a turboprop's slow flight makes the way back upwind impossible. */
+const LOW_JET_MAX = 150
+/** The low jet fades out between these distances (m) before the gate abscissa. */
+const LOW_JET_FADE = [16_000, 6_000] as const
+const NO_FADE = 1e12
 const LOW_JET_BOOST = 2.2
 /** Background westerly (m/s) at the surface and aloft: negative = easterly headwind for eastbound routes down low. */
 const BG_SURFACE = -4
@@ -437,9 +445,11 @@ export function generateLayout(params: WeatherParams): Layout {
       py: rj() * TAU,
       rh: low ? LOW_JET_HALF_WIDTH + 2000 * rj() : 7000 + 5000 * rj(),
       rv: 1400 + 500 * rj(),
-      speed: (40 + 50 * (0.2 + 0.8 * sev) * (0.6 + 0.4 * rj())) * (low ? LOW_JET_BOOST : 1),
+      speed: low ? Math.min(LOW_JET_MAX, (40 + 50 * (0.2 + 0.8 * sev) * (0.6 + 0.4 * rj())) * LOW_JET_BOOST) : 40 + 50 * (0.2 + 0.8 * sev) * (0.6 + 0.4 * rj()),
       shearTurb: 0.2 + 0.45 * sev,
       ks: TAU / (40_000 + 40_000 * rj()),
+      fadeX0: low ? fr.ax + fr.ux * fr.len - LOW_JET_FADE[0] : NO_FADE,
+      fadeX1: low ? fr.ax + fr.ux * fr.len - LOW_JET_FADE[1] : NO_FADE + 1,
       ps: rj() * TAU,
     }
     jets.push(jet)

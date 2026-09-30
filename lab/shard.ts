@@ -20,11 +20,24 @@ export interface ShardFile {
   readonly rows: FlightRow[]
   /** Fastest surfer flight per `${day}:${tier}` in this shard, ghost-encoded. */
   readonly ghosts: Record<string, { row: FlightRow; code: string }>
+  /** Set when the shard crashed. */
+  readonly error?: string
 }
 
 export const shardPath = (k: number): string => `${CACHE}/shard-${k}.json`
 
 export function runShard(k: number): void {
+  try {
+    flyShard(k)
+  } catch (err) {
+    // Tell the waiting report right away instead of letting it time out.
+    mkdirSync(CACHE, { recursive: true })
+    writeFileSync(shardPath(k), JSON.stringify({ run: process.ppid, shard: k, error: String((err as Error).stack ?? err) }))
+    throw err
+  }
+}
+
+function flyShard(k: number): void {
   const result = runMatrix(labDays(), PILOTS, undefined, (di, ti) => (di * 3 + ti) % SHARDS === k)
   const ghosts: ShardFile['ghosts'] = {}
   for (const [key, g] of result.ghosts) ghosts[key] = { row: g.row, code: ghostCodec.encode(g.ghost) }
