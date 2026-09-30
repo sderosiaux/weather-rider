@@ -8,8 +8,10 @@ import type {
   Ghost,
   GhostSample,
   HudModel,
+  LeaderboardEntry,
   PlayerProgress,
   Route,
+  SkyParams,
   Upgrade,
   UpgradeSlot,
   WeatherField,
@@ -54,6 +56,8 @@ export interface WorldView {
    * the canvas (the hangar UI panel covers the right side). null = back to the flight view.
    */
   setShowcase(showcase: { readonly spec: AircraftSpec; readonly liveryColor: string } | null): void
+  /** The day's light (sun, haze, warmth). Called whenever the shown day changes; before the first call, render keeps its own default look. */
+  setSky(sky: SkyParams): void
   dispose(): void
 }
 
@@ -88,6 +92,7 @@ export interface TitleCallbacks {
   onFly(routeId: string, aircraftId: string, ghostCode: string | null): void
   onHangar(): void
   onSettings(): void
+  onBoards(): void
 }
 
 /** Player preferences. Persisted by the game shell; edited by ui; applied by the shell to input/audio/flow/coach. */
@@ -100,9 +105,25 @@ export interface Settings {
   readonly flowIntensity: number
   /** In-flight coaching hints. */
   readonly coaching: boolean
+  /**
+   * Display name stamped into your ghosts and shown on boards. 1–20 printable characters; the shell sanitizes.
+   * Other players' names arrive inside ghost codes: untrusted text, render it as text, never as HTML.
+   */
+  readonly pilotName: string
 }
 
-export const DEFAULT_SETTINGS: Settings = { invertPitch: false, volume: 0.8, flowIntensity: 1, coaching: true }
+export const DEFAULT_SETTINGS: Settings = { invertPitch: false, volume: 0.8, flowIntensity: 1, coaching: true, pilotName: 'Pilot' }
+
+export type BoardKind = LeaderboardEntry['board']
+
+/** Today's boards. Local only (SPEC §10): your own runs plus the friends' ghosts you have raced. */
+export interface BoardsModel {
+  readonly daily: DailyWeather
+  /** The local player's display name, to highlight their rows. */
+  readonly pilot: string
+  /** routeId → board → entries, best first (at most 10). */
+  readonly boards: Readonly<Record<string, Readonly<Record<BoardKind, readonly LeaderboardEntry[]>>>>
+}
 
 /** Something the flight just unlocked, resolved to a display name by the caller. */
 export interface UnlockedItem {
@@ -146,6 +167,8 @@ export interface Screens {
       onBack(): void
     },
   ): void
+  /** Today's local boards per route; "Race" on a row replays that run as a ghost. */
+  showBoards(model: BoardsModel, cb: { onRace(entry: LeaderboardEntry): void; onBack(): void }): void
   /** Changes apply live (onChange on every edit); onBack closes. */
   showSettings(settings: Settings, cb: { onChange(settings: Settings): void; onBack(): void }): void
   hide(): void
