@@ -135,6 +135,7 @@ export function fixtureFlightState(t: number): AircraftState {
     orientation: q,
     angVel: v3(0, 0, 0),
     airspeed: speed - 8,
+    trimAirspeed: speed - 8,
     throttle: 0.7,
     fuelKg: fixtureAircraft.fuelCapacityKg - t * 0.25,
     gLoad: 1 + 0.2 * Math.sin(t / 3),

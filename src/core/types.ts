@@ -136,6 +136,11 @@ export interface AircraftState {
   readonly angVel: Vec3
   /** True airspeed (m/s). */
   readonly airspeed: number
+  /**
+   * Airspeed the aircraft settles back to hands-off (its trim, like a speed bug). The flight model moves it
+   * slowly toward the speed the current power sustains, energy-limited so a power cut never raises the nose.
+   */
+  readonly trimAirspeed: number
   readonly throttle: number
   readonly fuelKg: number
   /** Load factor along body up axis (1 = level flight). */
