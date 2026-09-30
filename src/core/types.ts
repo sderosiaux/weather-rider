@@ -326,5 +326,7 @@ export interface InputSource {
   /** Poll once per frame. */
   read(): Controls
   setInvertPitch(invert: boolean): void
+  /** New flight: stick to neutral, held keys cleared, persistent throttle set to the aircraft's trimmed throttle. */
+  resetForFlight(throttle: number): void
   dispose(): void
 }

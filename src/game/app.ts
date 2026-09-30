@@ -208,6 +208,8 @@ export function startApp(root: HTMLElement): void {
     hud.setVisible(true)
     audio.setScene('flight')
     const session = createFlightSession({ daily, route, spec, weather, pilot: progress.pilot, ghosts })
+    // Start hands-off in trim: the aircraft's trimmed throttle, not whatever the last flight left.
+    input.resetForFlight(session.state().throttle)
     const autopilot = dev?.autopilot ? createAutopilot(dev.autopilot, spec, route, weather) : null
     mode = { kind: 'flying', session, autopilot, timeScale: dev?.timeScale ?? 1 }
   }
