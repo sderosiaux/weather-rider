@@ -52,3 +52,6 @@ export const stepStick = (s: StickState, e: StickEvent): StickState => {
     }
   }
 }
+
+/** A new flight starts at neutral; if the pointer is still captured the stick stays live (else it could never re-arm). */
+export const stickForNewFlight = (pointerLocked: boolean): StickState => (pointerLocked ? { armed: true, dx: 0, dy: 0 } : DISARMED)

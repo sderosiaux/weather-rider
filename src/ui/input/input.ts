@@ -2,6 +2,7 @@ import type { Controls, InputSource } from '../../core/types'
 import {
   clamp,
   digitalAxis,
+  flightStartThrottle,
   integrateThrottle,
   mixAxis,
   orientPitch,
@@ -10,7 +11,7 @@ import {
   stickFromOffset,
   wheelToThrottleDelta,
 } from './mapping'
-import { DISARMED, MENU_EVENT, stepStick, type StickState } from './stick'
+import { DISARMED, MENU_EVENT, stepStick, stickForNewFlight, type StickState } from './stick'
 import './input.css'
 
 export interface InputOptions {
@@ -113,13 +114,17 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     const req = target.requestPointerLock() as unknown
     if (req instanceof Promise) req.catch(() => undefined)
   }
-  // A menu came up: whatever the pilot was holding is over. Next flight starts disarmed at neutral.
-  const onMenu = (): void => {
-    stick = DISARMED
+  // Drop everything the pilot was holding: stick, keys, smoothing, queued wheel, stale frame time.
+  const releaseControls = (nextStick: StickState): void => {
+    stick = nextStick
     usedKeysOrPad = false
     keys.clear()
+    pendingWheel = 0
+    last = performance.now()
     for (const k of Object.keys(smoothed) as (keyof typeof smoothed)[]) smoothed[k] = 0
   }
+  // A menu came up (it also releases pointer lock): the next flight starts disarmed at neutral.
+  const onMenu = (): void => releaseControls(DISARMED)
   const onWheel = (e: WheelEvent): void => {
     const px = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY
     pendingWheel += wheelToThrottleDelta(px, WHEEL_PER_PX)
@@ -226,5 +231,12 @@ export const createInput = (target: HTMLElement, options: InputOptions = {}): In
     invertPitch = invert
   }
 
-  return { read, setInvertPitch, dispose }
+  // Shell calls this right after creating a flight: neutral stick and the aircraft's trimmed throttle,
+  // so hands-off flight is level instead of pitching on a mismatched power setting.
+  const resetForFlight = (trim: number): void => {
+    releaseControls(stickForNewFlight(isLocked()))
+    throttle = flightStartThrottle(trim, throttle)
+  }
+
+  return { read, setInvertPitch, resetForFlight, dispose }
 }

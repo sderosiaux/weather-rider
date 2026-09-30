@@ -75,3 +75,6 @@ export const mixAxis = (sources: readonly number[], epsilon = 1e-3): number => {
  * Default: up = nose up (arcade). invert: pull back (down, S/↓) = nose up, like a real yoke.
  */
 export const orientPitch = (upInput: number, invert: boolean): number => (invert ? -upInput : upInput)
+
+/** Throttle handed over by the shell at flight start (the aircraft's trim). Garbage in → keep the current setting. */
+export const flightStartThrottle = (trim: number, current: number): number => (Number.isFinite(trim) ? clamp(trim, 0, 1) : current)

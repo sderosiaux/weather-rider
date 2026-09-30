@@ -3,6 +3,7 @@ import {
   deadzone,
   digitalAxis,
   expo,
+  flightStartThrottle,
   integrateThrottle,
   mixAxis,
   orientPitch,
@@ -129,5 +130,14 @@ describe('pitch inversion', () => {
     const shape = { deadzone: 0.05, expo: 0 }
     expect(stickFromOffset(0, 150, 150, shape, false).pitch).toBeCloseTo(-1)
     expect(stickFromOffset(0, 150, 150, shape, true).pitch).toBeCloseTo(1)
+  })
+})
+
+describe('flight start throttle', () => {
+  it('takes the aircraft trim, clamped, and ignores garbage', () => {
+    expect(flightStartThrottle(0.82, 0.7)).toBe(0.82)
+    expect(flightStartThrottle(1.4, 0.7)).toBe(1)
+    expect(flightStartThrottle(-0.1, 0.7)).toBe(0)
+    expect(flightStartThrottle(Number.NaN, 0.55)).toBe(0.55)
   })
 })

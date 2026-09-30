@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DISARMED, clampToRadius, stepStick, type StickEvent, type StickState } from './stick'
+import { DISARMED, clampToRadius, stepStick, stickForNewFlight, type StickEvent, type StickState } from './stick'
 
 const run = (s: StickState, events: StickEvent[]): StickState => events.reduce(stepStick, s)
 const move = (mx: number, my: number, radius = 200): StickEvent => ({ type: 'move', mx, my, radius })
@@ -53,5 +53,15 @@ describe('clampToRadius', () => {
     expect(c.dx).toBeCloseTo(60)
     expect(c.dy).toBeCloseTo(80)
     expect(clampToRadius(3, 4, 100)).toEqual({ dx: 3, dy: 4 })
+  })
+})
+
+describe('new flight', () => {
+  it('starts at neutral; stays live only if the pointer is still captured', () => {
+    expect(stickForNewFlight(false)).toEqual(DISARMED)
+    expect(stickForNewFlight(true)).toEqual({ armed: true, dx: 0, dy: 0 })
+    // A still-captured pointer must be able to steer right away.
+    const s = run(stickForNewFlight(true), [move(40, 0)])
+    expect(s.dx).toBe(40)
   })
 })
