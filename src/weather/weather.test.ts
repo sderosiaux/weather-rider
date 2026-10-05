@@ -5,7 +5,9 @@ import type { MutableWeatherSample, Vec3, WeatherField, WeatherFeature, WeatherP
 import { SEVERE_TURBULENCE } from '../core/constants'
 import { dailyWeatherFor, weatherParamsFor } from '../meta'
 import type { Route } from '../core/types'
+import { createSampler } from './field'
 import { createWeather } from './index'
+import { EDGE, generateLayout, jetY, jetZ, type JetSpec, type Layout } from './layout'
 
 const params = (seed: number, severity: number, gateZ = 0): WeatherParams => ({
   seed,
@@ -286,6 +288,203 @@ describe('routing decisions on real daily routes', () => {
     expect(tops[Math.floor(tops.length * 0.1)]!).toBeGreaterThanOrEqual(11_000)
     expect(tops[tops.length - 1]!).toBeLessThanOrEqual(13_500)
   })
+})
+
+type Jet = Extract<WeatherFeature, { kind: 'jetstream' }>
+type Shear = Extract<WeatherFeature, { kind: 'shear' }>
+
+/** Every severity on the test bounds, real daily routes, and narrow bounds whose sides cut jets into pieces. */
+function geometryCases(): WeatherParams[] {
+  const cases: WeatherParams[] = []
+  for (const severity of [0, 0.2, 0.45, 0.7, 0.85, 1]) {
+    for (let seed = 1; seed <= 8; seed++) cases.push(params(seed * 7919, severity, seed % 3 === 0 ? 12_000 : 0))
+  }
+  for (let n = 1; n <= 25; n++) {
+    const daily = dailyWeatherFor(n)
+    for (const route of daily.routes) cases.push(weatherParamsFor(daily, route))
+  }
+  for (let seed = 1; seed <= 12; seed++) cases.push({ ...params(seed, 0.6), boundsMin: v3(-10_000, 0, -10_000), boundsMax: v3(110_000, 14_000, 10_000) })
+  return cases
+}
+
+/** Published paths lying on jet j's core (their vertices are exact core points). */
+const pathsOf = (layout: Layout, j: JetSpec): Jet[] =>
+  layout.features.filter((f): f is Jet => f.kind === 'jetstream' && f.path.every((q) => Math.abs(q.y - jetY(j, q.x)) < 1e-6 && Math.abs(q.z - jetZ(j, q.x)) < 1e-6))
+
+// Render draws jet cirrus along the published paths and the bot plans jet legs from them: they must not claim
+// a jet where the air is calm, nor leave a real one out. A jet fades smoothly (bounds, and the low jet before
+// the gate), so its path runs where the core blows at ≥ half its speed, and the fade finishes past the ends.
+describe('published features match the sampled field', () => {
+  it('jet paths run exactly where the core blows at ≥ half its speed', () => {
+    const out = newOut()
+    const out2 = newOut()
+    let weakest = { share: Infinity, at: '' }
+    const misplaced: string[] = []
+    let splits = 0
+    for (const p of geometryCases()) {
+      const layout = generateLayout(p)
+      const full = createSampler(p, layout)
+      layout.jets.forEach((j, i) => {
+        const without = createSampler(p, { ...layout, jets: layout.jets.filter((_, k) => k !== i) })
+        const paths = pathsOf(layout, j)
+        if (paths.length > 1) splits++
+        // The jet's own wind on its core, as a share of its speed. No shear turbulence on the core: no gust difference.
+        for (let x = p.boundsMin.x; x <= p.boundsMax.x; x += 250) {
+          if (paths.some((f) => Math.abs(x - f.path[0]!.x) < 5 || Math.abs(x - f.path.at(-1)!.x) < 5)) continue
+          const q = v3(x, jetY(j, x), jetZ(j, x))
+          const a = full(q, 0, out).wind
+          const b = without(q, 0, out2).wind
+          const own = Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) / j.speed
+          const published = paths.some((f) => x >= f.path[0]!.x && x <= f.path.at(-1)!.x)
+          if (published !== (own >= 0.5)) misplaced.push(`seed ${p.seed} jet ${i + 1} x=${x} own ${own.toFixed(3)} published ${published}`)
+        }
+        // What a consumer flying the published path meets: the sampled wind along the path's direction.
+        for (const f of paths) {
+          for (let s = 0; s + 1 < f.path.length; s++) {
+            const a = f.path[s]!
+            const b = f.path[s + 1]!
+            const len = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z)
+            const n = Math.ceil(len / 250)
+            for (let k = 0; k <= n; k++) {
+              const q = v3(a.x + ((b.x - a.x) * k) / n, a.y + ((b.y - a.y) * k) / n, a.z + ((b.z - a.z) * k) / n)
+              for (const t of [0, 137, 411]) {
+                const w = full(q, t, out).wind
+                const share = (w.x * (b.x - a.x) + w.y * (b.y - a.y) + w.z * (b.z - a.z)) / len / f.speed
+                if (share < weakest.share) weakest = { share, at: `seed ${p.seed} ${f.id} x=${q.x.toFixed(0)} t=${t}` }
+              }
+            }
+          }
+        }
+      })
+    }
+    expect(misplaced.slice(0, 5)).toEqual([])
+    expect(weakest.share, weakest.at).toBeGreaterThanOrEqual(0.5)
+    // Narrow bounds must actually split jets, or the multi-piece case goes untested.
+    expect(splits).toBeGreaterThan(0)
+  }, 30_000)
+
+  it('past the end of its fade a jet leaves nothing: no wind, shear turbulence or cirrus', () => {
+    const out = newOut()
+    const out2 = newOut()
+    let wide = 0
+    let faded = 0
+    const leftovers: string[] = []
+    for (const p of geometryCases()) {
+      const { boundsMin: lo, boundsMax: hi } = p
+      if (hi.z - lo.z >= 40_000) wide++
+      const layout = generateLayout(p)
+      const full = createSampler(p, layout)
+      layout.jets.forEach((j, i) => {
+        const without = createSampler(p, { ...layout, jets: layout.jets.filter((_, k) => k !== i) })
+        for (const f of pathsOf(layout, j)) {
+          for (const [end, dir] of [[f.path[0]!, -1], [f.path.at(-1)!, 1]] as const) {
+            // Ends within reach of the bounds fade are the bounds' doing (the field stops at the bounds anyway).
+            if (Math.min(end.x - lo.x, hi.x - end.x, end.z - lo.z, hi.z - end.z) <= EDGE) continue
+            // Stopped by its own fade: ≤ 6.7 km later (half a 10 km fade, plus streaks) the jet is gone across its tube.
+            faded++
+            for (let x = end.x + dir * 7000; x > lo.x && x < hi.x; x += dir * 1000) {
+              for (let v = -1; v <= 1; v += 0.5) {
+                for (let l = -1; l <= 1; l += 0.5) {
+                  const q = v3(x, jetY(j, x) + v * f.thickness, jetZ(j, x) + l * f.radius)
+                  const a = full(q, 0, out)
+                  const b = without(q, 0, out2)
+                  const same = a.wind.x === b.wind.x && a.wind.y === b.wind.y && a.wind.z === b.wind.z && a.turbulence === b.turbulence && a.cloud === b.cloud && a.dominant === b.dominant
+                  if (!same) leftovers.push(`seed ${p.seed} ${f.id} x=${x.toFixed(0)} (${((x - end.x) / 1000).toFixed(1)} km past its end)`)
+                }
+              }
+            }
+          }
+        }
+      })
+    }
+    // On wide bounds every low jet stops before its gate.
+    expect(faded).toBeGreaterThanOrEqual(wide)
+    expect(leftovers.slice(0, 5)).toEqual([])
+  }, 30_000)
+
+  it('shear layers span exactly where their jet shears at ≥ half strength, and cover its tube', () => {
+    const out = newOut()
+    const out2 = newOut()
+    const misplaced: string[] = []
+    const uncovered: string[] = []
+    for (const p of geometryCases()) {
+      const { boundsMin: lo, boundsMax: hi } = p
+      const layout = generateLayout(p)
+      const full = createSampler(p, layout)
+      layout.jets.forEach((j, i) => {
+        const without = createSampler(p, { ...layout, jets: layout.jets.filter((_, k) => k !== i) })
+        const layers = (side: -1 | 1) => layout.features.filter((f): f is Shear => f.kind === 'shear' && Math.abs(f.altitude - (j.y0 + side * 0.55 * j.rv)) < 1e-6)
+        const below = layers(-1)
+        expect(layers(1).map((s) => [s.extentMin, s.extentMax])).toEqual(below.map((s) => [s.extentMin, s.extentMax]))
+        for (const s of below) {
+          const n = Math.ceil((s.extentMax.x - s.extentMin.x) / 250)
+          for (let k = 0; k <= n; k++) {
+            const x = s.extentMin.x + ((s.extentMax.x - s.extentMin.x) * k) / n
+            const z = jetZ(j, x)
+            if (z - j.rh < s.extentMin.z - 1 || z + j.rh > s.extentMax.z + 1) uncovered.push(`seed ${p.seed} ${s.id} x=${x.toFixed(0)}`)
+          }
+        }
+        // The jet's own turbulence where the layer below its core peaks (|∂k/∂v| is maximal √0.6 rv down its axis).
+        // Where the bounds fade is 1, 1 − turbulence = (1 − background) × Π(1 − each feature's), so it comes out exactly.
+        for (let x = lo.x + EDGE; x <= hi.x - EDGE; x += 250) {
+          const z = jetZ(j, x)
+          if (z - lo.z < EDGE || hi.z - z < EDGE) continue
+          if (below.some((s) => Math.abs(x - s.extentMin.x) < 5 || Math.abs(x - s.extentMax.x) < 5)) continue
+          const q = v3(x, jetY(j, x) - Math.sqrt(0.6) * j.rv, z)
+          const share = (1 - (1 - full(q, 0, out).turbulence) / (1 - without(q, 0, out2).turbulence)) / j.shearTurb
+          const published = below.some((s) => x >= s.extentMin.x && x <= s.extentMax.x)
+          if (published !== (share >= 0.5)) misplaced.push(`seed ${p.seed} jet ${i + 1} x=${x} share ${share.toFixed(3)} published ${published}`)
+        }
+      })
+    }
+    expect(uncovered.slice(0, 5)).toEqual([])
+    expect(misplaced.slice(0, 5)).toEqual([])
+  }, 30_000)
+
+  it('wake tracks stop where the wake tapers below half strength', () => {
+    const out = newOut()
+    const out2 = newOut()
+    const misplaced: string[] = []
+    let tracks = 0
+    for (const p of geometryCases().slice(0, 60)) {
+      const base = generateLayout(p)
+      // Turbulence-free wakes: the vortex wind is then the only difference a wake makes (same gusts either way).
+      const layout: Layout = { ...base, wakes: base.wakes.map((wk) => ({ ...wk, turb: 0 })) }
+      const full = createSampler(p, layout)
+      layout.wakes.forEach((wk, i) => {
+        const without = createSampler(p, { ...layout, wakes: layout.wakes.filter((_, k) => k !== i) })
+        const published = layout.features
+          .filter((f): f is Extract<WeatherFeature, { kind: 'wake' }> => f.kind === 'wake')
+          .filter((f) => f.path.every((q) => q.y === wk.alt && Math.abs((q.z - wk.az) * wk.dx - (q.x - wk.ax) * wk.dz) < 1e-6))
+          .map((f) => f.path.map((q) => (q.x - wk.ax) * wk.dx + (q.z - wk.az) * wk.dz) as [number, number])
+        tracks += published.length
+        const cycle = wk.length + wk.speed * wk.life
+        // Cross-track wind above each vortex, 6 s after the traffic passed s. The two sides are mirror images,
+        // so their difference sees the bounds fade of the track itself.
+        const strength = (s: number): number => {
+          const t = ((((s + wk.speed * 6 - wk.phase) % cycle) + cycle) % cycle) / wk.speed
+          let v = 0
+          for (const side of [-1, 1]) {
+            const q = v3(wk.ax + wk.dx * s - wk.dz * side * wk.span * 0.5, wk.alt + wk.rc, wk.az + wk.dz * s + wk.dx * side * wk.span * 0.5)
+            const a = full(q, t, out).wind
+            const b = without(q, t, out2).wind
+            v += side * (-(a.x - b.x) * wk.dz + (a.z - b.z) * wk.dx)
+          }
+          return Math.abs(v)
+        }
+        const along: [number, number][] = []
+        for (let s = 0; s <= wk.length; s += 250) along.push([s, strength(s)])
+        const peak = Math.max(...along.map(([, v]) => v))
+        for (const [s, v] of along) {
+          // 200 m either side of an end: the pair is sampled off the track, the bounds fade is not quite linear there.
+          if (published.some(([s0, s1]) => s >= s0 + 200 && s <= s1 - 200) && v < 0.5 * peak) misplaced.push(`seed ${p.seed} wake ${i + 1} s=${s} weak inside`)
+          if (published.every(([s0, s1]) => s < s0 - 200 || s > s1 + 200) && v >= 0.5 * peak) misplaced.push(`seed ${p.seed} wake ${i + 1} s=${s} strong outside`)
+        }
+      })
+    }
+    expect(tracks).toBeGreaterThan(100)
+    expect(misplaced.slice(0, 5)).toEqual([])
+  }, 30_000)
 })
 
 let sink: unknown = null

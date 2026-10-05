@@ -244,16 +244,34 @@ function drawFeatures(ctx: CanvasRenderingContext2D, alt: number) {
   for (const f of weather.features) {
     const color = FEATURE_COLORS[f.kind]
     if (f.kind === 'jetstream') {
-      ctx.strokeStyle = color
-      ctx.lineWidth = 1.5
-      ctx.setLineDash([2, 4])
-      ctx.beginPath()
+      const line = new Path2D()
       f.path.forEach((p, i) => {
         const [px, py] = planToPx(p.x, p.z)
-        if (i === 0) ctx.moveTo(px, py)
-        else ctx.lineTo(px, py)
+        if (i === 0) line.moveTo(px, py)
+        else line.lineTo(px, py)
       })
-      ctx.stroke()
+      // End bars: the path stops where the core falls below half its speed.
+      const bars = new Path2D()
+      for (const [a, b] of [[f.path[1]!, f.path[0]!], [f.path.at(-2)!, f.path.at(-1)!]] as const) {
+        const [ax, ay] = planToPx(a.x, a.z)
+        const [bx, by] = planToPx(b.x, b.z)
+        const k = 8 / (Math.hypot(bx - ax, by - ay) || 1)
+        bars.moveTo(bx + (by - ay) * k, by - (bx - ax) * k)
+        bars.lineTo(bx - (by - ay) * k, by + (bx - ax) * k)
+      }
+      // White halo underneath: the path stays readable over the dark core of the jet it describes.
+      ctx.setLineDash([])
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)'
+      ctx.lineWidth = 4
+      ctx.stroke(line)
+      ctx.lineWidth = 6
+      ctx.stroke(bars)
+      ctx.strokeStyle = color
+      ctx.lineWidth = 2.5
+      ctx.stroke(bars)
+      ctx.lineWidth = 1.5
+      ctx.setLineDash([2, 4])
+      ctx.stroke(line)
       const mid = f.path[Math.floor(f.path.length * 0.2)]!
       const [px, py] = planToPx(mid.x, mid.z)
       label(ctx, `${f.id} ${f.speed.toFixed(0)} m/s @${(mid.y / 1000).toFixed(1)} km`, px, py - 8, color)

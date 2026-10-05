@@ -2,12 +2,10 @@
 // columns are looked up through a uniform xz grid so cost is bounded by local feature density.
 import { hashInts } from '../core/rng'
 import type { MutableWeatherSample, Vec3, WeatherFeatureKind, WeatherParams, WeatherSample } from '../core/types'
-import { COLUMN_REACH, STORM, STORM_CORE, THERMAL, UPDRAFT, backgroundAngle, backgroundSpeed, jetY, jetZ, type ColumnSpec, type Layout } from './layout'
+import { COLUMN_REACH, EDGE, STORM, STORM_CORE, THERMAL, UPDRAFT, WAKE_TAPER, backgroundAngle, backgroundSpeed, jetY, jetZ, type ColumnSpec, type Layout } from './layout'
 import { D_PSI_DX, D_PSI_DZ, PHI, PSI, createNoisePair } from './noise'
 
 const CELL = 4000
-/** Features fade out over this distance inside the bounds so the field stays continuous at the border. */
-const EDGE = 3000
 /** Gust amplitude (m/s) at turbulence 1. */
 const GUST_H = 9
 const GUST_V = 5.5
@@ -243,6 +241,9 @@ export function createSampler(params: WeatherParams, layout: Layout): Sampler {
     const z = reg[PZ]!
     for (let i = 0; i < jets.length; i++) {
       const j = jets[i]!
+      // Past its fade the jet is gone: no wind, no shear layers, no cirrus.
+      let fu = (x - j.fadeX0) / (j.fadeX1 - j.fadeX0)
+      const fade = fu <= 0 ? 1 : fu >= 1 ? 0 : ((fu = 1 - fu), fu * fu * (3 - 2 * fu))
       const dv = y - jetY(j, x)
       if (dv <= -j.rv || dv >= j.rv) continue
       const slope = j.a1 * j.k1 * Math.cos(j.k1 * x + j.p1) + j.a2 * j.k2 * Math.cos(j.k2 * x + j.p2)
@@ -257,8 +258,7 @@ export function createSampler(params: WeatherParams, layout: Layout): Sampler {
       const k = 1 - q * q * (3 - 2 * q)
       const sy = j.ay * j.ky * Math.cos(j.ky * x + j.py)
       const inv = 1 / Math.sqrt(1 + slope * slope + sy * sy)
-      let fu = (x - j.fadeX0) / (j.fadeX1 - j.fadeX0)
-      const fade = fu <= 0 ? 1 : fu >= 1 ? 0 : ((fu = 1 - fu), fu * fu * (3 - 2 * fu))
+      // Streaks × fade: layout's `jetStreak` / `jetFade` publish the path from the same formulas.
       const sp = j.speed * (0.85 + 0.15 * Math.sin(j.ks * x + j.ps)) * k * fade
       acc[JX] = acc[JX]! + sp * inv
       acc[JY] = acc[JY]! + sp * sy * inv
@@ -311,9 +311,9 @@ export function createSampler(params: WeatherParams, layout: Layout): Sampler {
       let fade = u >= 1 ? cut : cut * u * u * (3 - 2 * u)
       u = (age - w.life * 0.4) / (w.life * 0.6)
       if (u > 0) fade *= 1 - u * u * (3 - 2 * u)
-      u = s / 3000
+      u = s / WAKE_TAPER
       if (u < 1) fade *= u * u * (3 - 2 * u)
-      u = (s - (w.length - 3000)) / 3000
+      u = (s - (w.length - WAKE_TAPER)) / WAKE_TAPER
       if (u > 0) fade *= u >= 1 ? 0 : 1 - u * u * (3 - 2 * u)
       if (fade <= 0) continue
       // Counter-rotating pair (smoothed Rankine vortices): downwash between, upwash outside.

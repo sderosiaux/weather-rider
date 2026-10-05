@@ -1,6 +1,6 @@
 // Deterministic generation of the weather layout from WeatherParams.
 // Produces both the public feature list and the compact specs the sampler evaluates.
-import { clamp, lerp, v3 } from '../core/math'
+import { clamp, lerp, smoothstep, v3 } from '../core/math'
 import { createRng, hashInts } from '../core/rng'
 import type { Vec3, WeatherFeature, WeatherParams } from '../core/types'
 
@@ -105,6 +105,19 @@ export interface Layout {
 }
 
 const TAU = Math.PI * 2
+/** Features fade out over this distance inside the bounds so the field stays continuous at the border. */
+export const EDGE = 3000
+/** A wake fades in and out over this length at each end of its track. */
+export const WAKE_TAPER = 3000
+/**
+ * A published jet path, shear layer or wake track covers where the feature is at ≥ this share of its nominal
+ * strength. Its fade-outs (bounds, the low jet before the gate, wake tapers) are smooth and a published extent
+ * can only stop: the half-strength point is the best step approximation of a smooth fade.
+ */
+const PUBLISHED_SHARE = 0.5
+/** Step (m) of the scan that locates where a feature's strength crosses PUBLISHED_SHARE. */
+const SCAN_STEP = 100
+const JET_VERTEX_STEP = 4000
 /** Horizontal reach of a column's influence, in radii. Must match the sampler's kernels. */
 export const COLUMN_REACH = 1.6
 /** Storm reach: the anvil is centred 1.3 R downwind with a 3.0 R semi-axis (4.3 R), plus margin. */
@@ -453,26 +466,44 @@ export function generateLayout(params: WeatherParams): Layout {
       ps: rj() * TAU,
     }
     jets.push(jet)
-    const path: Vec3[] = []
-    for (let x = bmin.x; x <= bmax.x + 1; x += 4000) path.push(v3(x, jetY(jet, x), jetZ(jet, x)))
-    features.push({ kind: 'jetstream', id: `jet-${i + 1}`, path, radius: jet.rh, thickness: jet.rv, speed: jet.speed })
-    let zLo = Infinity
-    let zHi = -Infinity
-    for (const q of path) {
-      zLo = Math.min(zLo, q.z - jet.rh)
-      zHi = Math.max(zHi, q.z + jet.rh)
-    }
-    for (const side of [-1, 1] as const) {
-      features.push({
-        kind: 'shear',
-        id: `shear-${i + 1}-${side < 0 ? 'low' : 'high'}`,
-        altitude: jet.y0 + side * jet.rv * 0.55,
-        thickness: jet.rv * 0.6,
-        deltaWind: v3(-side * jet.speed, 0, 0),
-        extentMin: v3(bmin.x, jet.y0 - jet.ay - jet.rv, zLo),
-        extentMax: v3(bmax.x, jet.y0 + jet.ay + jet.rv, zHi),
-      })
-    }
+    // Published where they are at ≥ half strength: the low jet stops before the gate, and a core that leaves the
+    // bounds sideways splits the jet into several features. The shear layers fade with the jet but have no streaks.
+    const fadeAt = (x: number) => jetFade(jet, x) * edgeFade(bmin, bmax, x, jetZ(jet, x))
+    const tagOf = (count: number, r: number) => (count === 1 ? `${i + 1}` : `${i + 1}-${r + 1}`)
+    const core = (x: number) => v3(x, jetY(jet, x), jetZ(jet, x))
+    const jetRuns = halfRuns((x) => jetStreak(jet, x) * fadeAt(x), bmin.x, bmax.x)
+    jetRuns.forEach(([x0, x1], r) => {
+      const path = [core(x0)]
+      // Vertices on a grid anchored at the bounds' west side (consumers interpolate between them: keep them put),
+      // none within 1 km of an end (no sliver segments).
+      for (let x = bmin.x + Math.ceil((x0 - bmin.x) / JET_VERTEX_STEP) * JET_VERTEX_STEP; x < x1; x += JET_VERTEX_STEP) {
+        if (x - x0 >= 1000 && x1 - x >= 1000) path.push(core(x))
+      }
+      path.push(core(x1))
+      features.push({ kind: 'jetstream', id: `jet-${tagOf(jetRuns.length, r)}`, path, radius: jet.rh, thickness: jet.rv, speed: jet.speed })
+    })
+    const shearRuns = halfRuns(fadeAt, bmin.x, bmax.x)
+    shearRuns.forEach(([x0, x1], r) => {
+      let zLo = Infinity
+      let zHi = -Infinity
+      for (let x = x0; ; x = Math.min(x + SCAN_STEP, x1)) {
+        const z = jetZ(jet, x)
+        zLo = Math.min(zLo, z - jet.rh)
+        zHi = Math.max(zHi, z + jet.rh)
+        if (x === x1) break
+      }
+      for (const side of [-1, 1] as const) {
+        features.push({
+          kind: 'shear',
+          id: `shear-${tagOf(shearRuns.length, r)}-${side < 0 ? 'low' : 'high'}`,
+          altitude: jet.y0 + side * jet.rv * 0.55,
+          thickness: jet.rv * 0.6,
+          deltaWind: v3(-side * jet.speed, 0, 0),
+          extentMin: v3(x0, jet.y0 - jet.ay - jet.rv, zLo),
+          extentMax: v3(x1, jet.y0 + jet.ay + jet.rv, zHi),
+        })
+      }
+    })
   }
 
   // ── Wake turbulence from background traffic crossing the corridor region.
@@ -506,12 +537,13 @@ export function generateLayout(params: WeatherParams): Layout {
       phase: rw() * (length + speed * life),
     }
     wakes.push(wake)
-    features.push({
-      kind: 'wake',
-      id: `wake-${i + 1}`,
-      path: [v3(wake.ax, wake.alt, wake.az), v3(wake.ax + dx * length, wake.alt, wake.az + dz * length)],
-      radius: rc,
-      strength: wake.vmax,
+    // The track runs bound to bound; its ends taper (and meet the bounds fade), so it is published like a jet.
+    const at = (s: number) => v3(wake.ax + dx * s, wake.alt, wake.az + dz * s)
+    const taper = (s: number) => smoothstep(0, WAKE_TAPER, s) * (1 - smoothstep(length - WAKE_TAPER, length, s))
+    const runs = halfRuns((s) => taper(s) * edgeFade(bmin, bmax, wake.ax + dx * s, wake.az + dz * s), 0, length)
+    runs.forEach(([s0, s1], r) => {
+      const id = runs.length === 1 ? `wake-${i + 1}` : `wake-${i + 1}-${r + 1}`
+      features.push({ kind: 'wake', id, path: [at(s0), at(s1)], radius: rc, strength: wake.vmax })
     })
   }
 
@@ -524,6 +556,50 @@ export function jetZ(j: JetSpec, x: number): number {
 
 export function jetY(j: JetSpec, x: number): number {
   return j.y0 + j.ay * Math.sin(j.ky * x + j.py)
+}
+
+// Same formulas as the sampler's `jetstreams`, which writes them out on its hot path.
+/** Along-jet streaks: the core blows at 70–100 % of `speed`. */
+function jetStreak(j: JetSpec, x: number): number {
+  return 0.85 + 0.15 * Math.sin(j.ks * x + j.ps)
+}
+
+/** 1 → 0 across the jet's fade (the low jet's, before the gate): its wind, shear layers and cirrus fade together. */
+function jetFade(j: JetSpec, x: number): number {
+  return 1 - smoothstep(j.fadeX0, j.fadeX1, x)
+}
+
+/** Factor the sampler applies to every feature at (x, z): 0 outside the bounds, rising over EDGE inside. */
+function edgeFade(bmin: Vec3, bmax: Vec3, x: number, z: number): number {
+  if (!(x > bmin.x && x < bmax.x && z > bmin.z && z < bmax.z)) return 0
+  return smoothstep(0, EDGE, Math.min(x - bmin.x, bmax.x - x)) * smoothstep(0, EDGE, Math.min(z - bmin.z, bmax.z - z))
+}
+
+/** Maximal intervals of [a, b] where strength ≥ PUBLISHED_SHARE, ends located to 1 m on the inside. Slivers under a scan step are dropped. */
+function halfRuns(strength: (s: number) => number, a: number, b: number): [number, number][] {
+  const inside = (s: number) => strength(s) >= PUBLISHED_SHARE
+  const cross = (inS: number, outS: number): number => {
+    while (Math.abs(outS - inS) > 1) {
+      const m = (inS + outS) / 2
+      if (inside(m)) inS = m
+      else outS = m
+    }
+    return inS
+  }
+  const runs: [number, number][] = []
+  let start: number | null = inside(a) ? a : null
+  const n = Math.ceil((b - a) / SCAN_STEP)
+  for (let k = 1; k <= n; k++) {
+    const prev = a + (k - 1) * SCAN_STEP
+    const s = k === n ? b : a + k * SCAN_STEP
+    if (inside(s)) start ??= cross(s, prev)
+    else if (start !== null) {
+      runs.push([start, cross(prev, s)])
+      start = null
+    }
+  }
+  if (start !== null) runs.push([start, b])
+  return runs.filter(([s0, s1]) => s1 - s0 >= SCAN_STEP)
 }
 
 /** Parameter range [sMin, sMax] of the line p + s·d inside the xz rectangle. */
