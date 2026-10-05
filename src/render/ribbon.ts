@@ -1,5 +1,5 @@
 // Camera-facing ribbons with a minimum on-screen width: contrails (age-driven width/fade) and ghost
-// trails ("best routes stay visible as lines in the sky").
+// trails ("best routes stay visible as lines in the sky", tinted by the air they crossed).
 import * as THREE from 'three'
 import { ATMOSPHERE_GLSL, type AtmosphereUniforms } from './atmosphere'
 
@@ -14,7 +14,11 @@ export interface RibbonOptions {
   readonly life: number
   /** Minimum half width on screen (px). */
   readonly minPx: number
-  readonly additive: boolean
+  /**
+   * 0 = pure light added to the frame (a glowing thread), 1 = paint laid over it. Light vanishes on a
+   * bright sky and on white clouds; paint keeps its hue there.
+   */
+  readonly ink: number
   /** How much aerial haze applies (1 = physical, lower = the line stays legible far away). */
   readonly haze: number
   /** Lit by the sun (contrail) vs self-luminous (trail). */
@@ -27,6 +31,11 @@ export interface Ribbon {
   readonly mesh: THREE.Mesh
   /** points: xyz triplets; stamps: per-point time (contrail birth time or ghost sample time). */
   set(points: Float32Array, stamps: Float32Array, count: number): void
+  /**
+   * Trails only, per point: linear rgb of the air crossed there, a = how strongly the air acted (0 = calm:
+   * the ribbon keeps its own colour). Strong air widens the line and turns it from light into paint.
+   */
+  setTints(tints: Float32Array, count: number): void
   /** now: current time for age; head: ghost time to highlight (trails). */
   setTime(now: number, head: number): void
   setPixelAngle(radPerPx: number): void
@@ -34,12 +43,18 @@ export interface Ribbon {
   dispose(): void
 }
 
+/** Trails: how much bolder (alpha, width) a segment gets where the air acted at full strength. */
+const AIR_ALPHA = 2.2
+const AIR_WIDEN = 1.0
+const AIR_INK = 0.85
+
 export function createRibbon(atmosphere: AtmosphereUniforms, capacity: number, opts: RibbonOptions): Ribbon {
   const geometry = new THREE.BufferGeometry()
   const pos = new Float32Array(capacity * 2 * 3)
   const other = new Float32Array(capacity * 2 * 3)
   const side = new Float32Array(capacity * 2)
   const stamp = new Float32Array(capacity * 2)
+  const tint = new Float32Array(capacity * 2 * 4)
   for (let i = 0; i < capacity; i++) {
     side[i * 2] = -1
     side[i * 2 + 1] = 1
@@ -52,10 +67,12 @@ export function createRibbon(atmosphere: AtmosphereUniforms, capacity: number, o
   const posAttr = new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage)
   const otherAttr = new THREE.BufferAttribute(other, 3).setUsage(THREE.DynamicDrawUsage)
   const stampAttr = new THREE.BufferAttribute(stamp, 1).setUsage(THREE.DynamicDrawUsage)
+  const tintAttr = new THREE.BufferAttribute(tint, 4)
   geometry.setAttribute('position', posAttr)
   geometry.setAttribute('aOther', otherAttr)
   geometry.setAttribute('aSide', new THREE.BufferAttribute(side, 1))
   geometry.setAttribute('aStamp', stampAttr)
+  geometry.setAttribute('aTint', tintAttr)
   geometry.setIndex(index)
   geometry.setDrawRange(0, 0)
 
@@ -74,12 +91,14 @@ export function createRibbon(atmosphere: AtmosphereUniforms, capacity: number, o
       uHaze: { value: opts.haze },
       uLit: { value: opts.lit ? 1 : 0 },
       uNearFade: { value: opts.nearFade },
+      uInk: { value: opts.ink },
     },
     vertexShader: /* glsl */ `
       ${ATMOSPHERE_GLSL}
       attribute vec3 aOther;
       attribute float aSide;
       attribute float aStamp;
+      attribute vec4 aTint;
       uniform float uHalfWidth;
       uniform float uGrowth;
       uniform float uLife;
@@ -96,6 +115,7 @@ export function createRibbon(atmosphere: AtmosphereUniforms, capacity: number, o
       varying vec3 vFogCol;
       varying float vHead;
       varying float vLight;
+      varying vec4 vTint;
       void main() {
         vec3 p = position;
         vec3 toCam = uCamPos - p;
@@ -107,8 +127,9 @@ export function createRibbon(atmosphere: AtmosphereUniforms, capacity: number, o
         float al = length(across);
         across = al > 1e-4 ? across / al : vec3(0.0, 1.0, 0.0);
         float age = max(uNow - aStamp, 0.0);
-        float hw = uHalfWidth + uGrowth * age;
-        float minHw = dist * uPixelAngle * uMinPx;
+        float widen = 1.0 + ${AIR_WIDEN.toFixed(2)} * aTint.a;
+        float hw = (uHalfWidth + uGrowth * age) * widen;
+        float minHw = dist * uPixelAngle * uMinPx * widen;
         float w = max(hw, minHw);
         p += across * aSide * w;
         vSide = aSide;
@@ -119,6 +140,7 @@ export function createRibbon(atmosphere: AtmosphereUniforms, capacity: number, o
         vAlpha = uOpacity * fade * mix(coverage, 1.0, 0.5) * nearFade;
         vHead = exp(-abs(aStamp - uHead) * 0.08);
         vLight = 0.6 + 0.4 * max(dot(normalize(toCam), uSunDir) * -1.0, 0.0);
+        vTint = aTint;
         vec3 tr = fogTransmittance(p);
         vFogTr = mix(vec3(1.0), tr, uHaze);
         vFogCol = skyColor(normalize(p - uCamPos));
@@ -128,33 +150,52 @@ export function createRibbon(atmosphere: AtmosphereUniforms, capacity: number, o
     fragmentShader: /* glsl */ `
       uniform vec3 uColor;
       uniform vec3 uSunColor;
+      uniform vec3 uContrailShade;
       uniform float uLit;
+      uniform float uInk;
       varying float vSide;
       varying float vAlpha;
       varying vec3 vFogTr;
       varying vec3 vFogCol;
       varying float vHead;
       varying float vLight;
+      varying vec4 vTint;
       void main() {
         float profile = 1.0 - vSide * vSide;
         profile *= profile;
-        vec3 col = uLit > 0.5 ? uColor * mix(vec3(0.6, 0.66, 0.8), uSunColor * 0.7, vLight) : uColor * (1.0 + 0.8 * vHead);
-        float a = vAlpha * profile * (uLit > 0.5 ? 1.0 : 0.55 + 0.45 * vHead);
-        col = col * vFogTr + vFogCol * (1.0 - vFogTr) * (uLit > 0.5 ? 1.0 : 0.0);
-        a *= uLit > 0.5 ? 1.0 : dot(vFogTr, vec3(0.333));
-        gl_FragColor = vec4(col, a);
+        vec3 col;
+        float a;
+        float ink = uInk;
+        if (uLit > 0.5) {
+          col = uColor * mix(uContrailShade, uSunColor * 0.7, vLight);
+          col = col * vFogTr + vFogCol * (1.0 - vFogTr);
+          a = vAlpha * profile;
+        } else {
+          // Self-luminous: haze only fades it (it has no colour of its own to hand to the sky).
+          col = mix(uColor, vTint.rgb, vTint.a) * (1.0 + 0.8 * vHead) * vFogTr;
+          a = vAlpha * profile * (0.55 + 0.45 * vHead) * mix(1.0, ${AIR_ALPHA.toFixed(2)}, vTint.a) * dot(vFogTr, vec3(0.333));
+          ink = mix(uInk, ${AIR_INK.toFixed(2)}, vTint.a);
+        }
+        gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
+        // Premultiplied: rgb·a is always added, ink decides how much of the frame behind it is covered.
+        a = min(a, 1.0);
+        gl_FragColor = vec4(gl_FragColor.rgb * a, a * ink);
       }
     `,
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
-    blending: opts.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+    // Trails speak the wind-particle colour language (flow draws untonemapped): same hues on screen.
+    toneMapped: opts.lit,
   })
   const mesh = new THREE.Mesh(geometry, material)
   mesh.frustumCulled = false
-  mesh.renderOrder = opts.additive ? 30 : 20
+  mesh.renderOrder = opts.lit ? 20 : 30
 
   return {
     mesh,
@@ -185,6 +226,14 @@ export function createRibbon(atmosphere: AtmosphereUniforms, capacity: number, o
       otherAttr.needsUpdate = true
       stampAttr.needsUpdate = true
       geometry.setDrawRange(0, Math.max(0, n - 1) * 6)
+    },
+    setTints(tints, count) {
+      const n = Math.min(count, capacity)
+      for (let i = 0; i < n; i++) {
+        for (let c = 0; c < 4; c++) tint[i * 8 + c] = tint[i * 8 + 4 + c] = tints[i * 4 + c]!
+      }
+      tint.fill(0, n * 8)
+      tintAttr.needsUpdate = true
     },
     setTime(now, head) {
       material.uniforms.uNow!.value = now

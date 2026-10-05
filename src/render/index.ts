@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import type { CreateWorldView, GhostVisual, WorldFrame } from '../core/presentation'
-import type { AircraftSpec, AircraftState, MutableWeatherSample, Route, WeatherField, WeatherFeature } from '../core/types'
+import type { AircraftSpec, AircraftState, MutableWeatherSample, Route, SkyParams, WeatherField, WeatherFeature } from '../core/types'
 import { createAircraftVisual } from './aircraft/visual'
-import { createAtmosphereUniforms, createSky, PALETTE, SUN_DIR } from './atmosphere'
+import { applyLook, createAtmosphereUniforms, createSky } from './atmosphere'
 import { createChaseCamera, smoothing } from './camera'
 import { easeInOut, SHOWCASE_ELEVATION, SHOWCASE_FOV, showcaseFraming, TURNTABLE_RATE } from './showcase'
 import { layoutClouds, layoutHorizon } from './clouds/layout'
@@ -11,6 +11,7 @@ import { createCloudLayer } from './clouds/mesh'
 import { createGateLayer } from './gate'
 import { createGhostLayer } from './ghosts'
 import { createSea, MAX_SEA_SHADOWS } from './sea'
+import { DEFAULT_SKY, sameSky, skyLook } from './sky'
 import { createGlowTexture, createNoiseTexture, createPuffAtlas } from './textures'
 
 const NEAR = 0.5
@@ -41,13 +42,26 @@ function upperWindDir(weather: WeatherField): { x: number; y: number; z: number 
   return l > 0.5 ? { x: w.x / l, y: 0, z: w.z / l } : { x: 1, y: 0, z: 0 }
 }
 
-/** Soft cloud shadows on the sea under the biggest vertical clouds. */
-function seaShadows(features: readonly WeatherFeature[]): [number, number, number, number][] {
+/** Longest shadow cast kept (m): further out it is lost in the haze, too far from its cloud to read. */
+const MAX_SHADOW_REACH = 30_000
+
+/**
+ * Soft cloud shadows on the sea under the biggest vertical clouds, cast along the sun from each cloud's
+ * mid-body: far from the cloud at a low sun, right under it at noon.
+ */
+function seaShadows(features: readonly WeatherFeature[], sun: THREE.Vector3): [number, number, number, number][] {
+  const h = Math.hypot(sun.x, sun.z)
+  const awayX = h > 1e-6 ? -sun.x / h : 0
+  const awayZ = h > 1e-6 ? -sun.z / h : 0
   const discs: [number, number, number, number][] = []
+  const cast = (x: number, z: number, height: number, radius: number, strength: number): void => {
+    const d = Math.min((height * h) / Math.max(sun.y, 1e-3), MAX_SHADOW_REACH)
+    discs.push([x + awayX * d, z + awayZ * d, radius, strength])
+  }
   for (const f of features) {
-    if (f.kind === 'storm') discs.push([f.center.x, f.center.z, f.radius * 2.2, 0.75])
-    else if (f.kind === 'updraft') discs.push([f.center.x, f.center.z, f.radius * 1.6, 0.45])
-    else if (f.kind === 'thermal') discs.push([f.center.x, f.center.z, f.radius * 1.3, 0.25])
+    if (f.kind === 'storm') cast(f.center.x, f.center.z, f.base + (f.top - f.base) * 0.4, f.radius * 2.2, 0.75)
+    else if (f.kind === 'updraft') cast(f.center.x, f.center.z, (Math.max(f.base + (f.top - f.base) * 0.3, 1200) + f.top) / 2, f.radius * 1.6, 0.45)
+    else if (f.kind === 'thermal') cast(f.center.x, f.center.z, f.top, f.radius * 1.3, 0.25)
   }
   return discs.sort((a, b) => b[2] * b[3] - a[2] * a[3]).slice(0, MAX_SEA_SHADOWS)
 }
@@ -66,13 +80,18 @@ export const createWorldView: CreateWorldView = (canvas) => {
   renderer.toneMappingExposure = 0.85
   renderer.outputColorSpace = THREE.SRGBColorSpace
 
+  // The day's light. Until the first setSky: the shipped look.
+  let daySky: SkyParams = DEFAULT_SKY
+  let look = skyLook(daySky)
+
   const scene = new THREE.Scene()
   // For third-party layers using built-in materials (flow particles): an approximate match of our haze.
-  scene.fog = new THREE.FogExp2(PALETTE.horizonAway.clone().lerp(PALETTE.horizonSun, 0.3).multiplyScalar(0.8), 1.4e-5)
+  const fog = new THREE.FogExp2(look.sceneFog.clone(), look.sceneFogDensity)
+  scene.fog = fog
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, NEAR, FAR)
   camera.position.set(0, 3000, 0)
 
-  const atmosphere = createAtmosphereUniforms()
+  const atmosphere = createAtmosphereUniforms(look)
   const noise = createNoiseTexture()
   const atlas = createPuffAtlas()
   const glow = createGlowTexture()
@@ -89,9 +108,9 @@ export const createWorldView: CreateWorldView = (canvas) => {
   const cloudScene = new THREE.Scene()
   cloudScene.add(clouds.mesh)
 
-  const sun = new THREE.DirectionalLight(new THREE.Color(1.0, 0.8, 0.6), 3.2)
-  sun.position.copy(SUN_DIR)
-  const hemi = new THREE.HemisphereLight(new THREE.Color(0.55, 0.65, 0.85), new THREE.Color(0.12, 0.16, 0.22), 1.3)
+  const sun = new THREE.DirectionalLight(look.light.clone(), look.lightIntensity)
+  sun.position.copy(look.sunDir)
+  const hemi = new THREE.HemisphereLight(look.hemiSky.clone(), look.hemiGround.clone(), look.hemiIntensity)
   for (const light of [sun, hemi]) light.layers.enable(AIRCRAFT_LAYER)
   // Showcase rim: a cool back light that only touches the aircraft pass.
   const rim = new THREE.DirectionalLight(new THREE.Color(0.65, 0.8, 1.0), 0)
@@ -101,13 +120,14 @@ export const createWorldView: CreateWorldView = (canvas) => {
   const key = new THREE.DirectionalLight(new THREE.Color(1.0, 0.93, 0.84), 0)
   key.layers.set(AIRCRAFT_LAYER)
   scene.add(rim, rim.target, key, key.target)
-  const hemiGroundFlight = hemi.groundColor.clone()
   /** Showcase bounce: sunlit cloud tops below, instead of the dark sea. */
   const hemiGroundShowcase = new THREE.Color(0.5, 0.47, 0.44)
   scene.add(sky, sea.mesh, cloudPass.composite, clouds.depthMesh, aircraft.worldObjects, ghosts.group, gate.group, sun, hemi, aircraft.group)
   const drawingSize = new THREE.Vector2()
 
   let weather: WeatherField | null = null
+  /** Cloud layout (and its per-cloud sun shading) is stale: rebuilt once, at the next render. */
+  let cloudsDirty = false
   let spec: AircraftSpec | null = null
   let time = 0
   let simT = 0
@@ -180,13 +200,13 @@ export const createWorldView: CreateWorldView = (canvas) => {
     // Camera: three-quarter, slightly high, the sun behind the camera so the livery is lit.
     const aspect = cssWidth / cssHeight
     const { distance } = showcaseFraming(framingRadius, aspect, SHOWCASE_FOV)
-    const sunYaw = Math.atan2(-SUN_DIR.z, SUN_DIR.x) + 0.6
+    const sunYaw = Math.atan2(-look.sunDir.z, look.sunDir.x) + 0.6
     camShowPos.set(Math.cos(sunYaw) * Math.cos(SHOWCASE_ELEVATION), Math.sin(SHOWCASE_ELEVATION), -Math.sin(sunYaw) * Math.cos(SHOWCASE_ELEVATION))
     rim.position.copy(stage).addScaledVector(camShowPos, -1).addScaledVector(upY, 0.6)
     rim.target.position.copy(stage)
     rim.intensity = 2.2 * e
-    sun.intensity = 3.2 + 0.6 * e
-    hemi.groundColor.copy(hemiGroundFlight).lerp(hemiGroundShowcase, e)
+    sun.intensity = look.lightIntensity + 0.6 * e
+    hemi.groundColor.copy(look.hemiGround).lerp(hemiGroundShowcase, e)
     // Key: from the camera direction, raised and swung a little left of it.
     key.position.copy(camShowPos).applyAxisAngle(upY, 0.45).addScaledVector(upY, 0.55).add(stage)
     key.target.position.copy(stage)
@@ -217,15 +237,36 @@ export const createWorldView: CreateWorldView = (canvas) => {
     camera.updateProjectionMatrix()
   }
 
+  const layoutWeather = (w: WeatherField): void => {
+    const opts = { seed: w.seed, sun: look.sunDir, windDir: upperWindDir(w) }
+    clouds.setPuffs([...layoutClouds(w.features, opts), ...layoutHorizon(w.boundsMin, w.boundsMax, opts)])
+    sea.setShadows(seaShadows(w.features, look.sunDir), look.sunDir)
+  }
+
   return {
     scene,
     camera,
     renderer,
     setWeather(w) {
       weather = w
-      const opts = { seed: w.seed, sun: SUN_DIR, windDir: upperWindDir(w) }
-      clouds.setPuffs([...layoutClouds(w.features, opts), ...layoutHorizon(w.boundsMin, w.boundsMax, opts)])
-      sea.setShadows(seaShadows(w.features))
+      cloudsDirty = true
+      ghosts.setWeather(w)
+    },
+    setSky(next) {
+      if (sameSky(next, daySky)) return
+      daySky = next
+      look = skyLook(next)
+      applyLook(atmosphere, look)
+      sun.color.copy(look.light)
+      sun.intensity = look.lightIntensity
+      sun.position.copy(look.sunDir)
+      hemi.color.copy(look.hemiSky)
+      hemi.groundColor.copy(look.hemiGround)
+      hemi.intensity = look.hemiIntensity
+      fog.color.copy(look.sceneFog)
+      fog.density = look.sceneFogDensity
+      // Clouds are shaded against the sun at layout time.
+      cloudsDirty = true
     },
     setRoute(route: Route) {
       gate.set(route)
@@ -245,7 +286,7 @@ export const createWorldView: CreateWorldView = (canvas) => {
       showcase = next ? { spec: next.spec, livery: next.liveryColor } : null
     },
     setGhosts(list: readonly GhostVisual[]) {
-      ghosts.set(list)
+      ghosts.set(list, weather)
     },
     update(frame: WorldFrame) {
       const dt = Math.min(Math.max(frame.dtReal, 0), 0.25)
@@ -266,6 +307,10 @@ export const createWorldView: CreateWorldView = (canvas) => {
       }
     },
     render() {
+      if (cloudsDirty && weather) {
+        layoutWeather(weather)
+        cloudsDirty = false
+      }
       camera.updateMatrixWorld()
       atmosphere.uCamPos.value.copy(camera.position)
       atmosphere.uTime.value = time

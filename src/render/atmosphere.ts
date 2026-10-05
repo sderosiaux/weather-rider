@@ -1,45 +1,28 @@
 // One stylised atmosphere shared by every material: the sky shader and the aerial perspective applied to
 // clouds, sea, trails and the gate call the same skyColor(), so distant things dissolve into exactly
 // the sky behind them. That consistency is what makes the frame read as a painting.
+// The day's light (sky.ts) only ever lands here, in shared uniforms: every material follows it for free.
 import * as THREE from 'three'
-
-const deg = Math.PI / 180
-
-/** Low golden sun, ahead-left of the eastbound route (north is -z). */
-const SUN_ELEVATION = 8 * deg
-const SUN_AZIMUTH = 70 * deg
-export const SUN_DIR = new THREE.Vector3(
-  Math.cos(SUN_ELEVATION) * Math.cos(SUN_AZIMUTH),
-  Math.sin(SUN_ELEVATION),
-  -Math.cos(SUN_ELEVATION) * Math.sin(SUN_AZIMUTH),
-).normalize()
-
-/** Scene palette, linear HDR. The single place to art-direct the world's light. */
-export const PALETTE = {
-  zenith: new THREE.Color(0.05, 0.13, 0.36),
-  midSky: new THREE.Color(0.2, 0.36, 0.7),
-  horizonSun: new THREE.Color(1.3, 0.78, 0.45),
-  horizonAway: new THREE.Color(0.62, 0.66, 0.82),
-  belowHorizon: new THREE.Color(0.3, 0.36, 0.5),
-  sun: new THREE.Color(2.0, 1.25, 0.66),
-  /** Blue-violet light filling cloud shadows. */
-  cloudShadow: new THREE.Color(0.12, 0.14, 0.26),
-  /** Ambient on sunlit cloud tops (sky dome contribution). */
-  cloudAmbient: new THREE.Color(0.5, 0.58, 0.8),
-  seaDeep: new THREE.Color(0.012, 0.045, 0.1),
-  inCloud: new THREE.Color(0.78, 0.78, 0.82),
-}
+import type { SkyLook } from './sky'
 
 export interface AtmosphereUniforms {
   [name: string]: THREE.IUniform
   uSunDir: THREE.IUniform<THREE.Vector3>
   uSunColor: THREE.IUniform<THREE.Color>
+  uSunGlow: THREE.IUniform<THREE.Color>
+  /** Halo lobe weights around the sun: broad, medium, tight. */
+  uHalo: THREE.IUniform<THREE.Vector3>
   uZenith: THREE.IUniform<THREE.Color>
   uMidSky: THREE.IUniform<THREE.Color>
   uHorizonSun: THREE.IUniform<THREE.Color>
   uHorizonAway: THREE.IUniform<THREE.Color>
   uBelowHorizon: THREE.IUniform<THREE.Color>
+  uHorizonPow: THREE.IUniform<number>
   uInCloudColor: THREE.IUniform<THREE.Color>
+  uCloudShadow: THREE.IUniform<THREE.Color>
+  uCloudAmbient: THREE.IUniform<THREE.Color>
+  uSeaDeep: THREE.IUniform<THREE.Color>
+  uContrailShade: THREE.IUniform<THREE.Color>
   uCamPos: THREE.IUniform<THREE.Vector3>
   /** Height fog: density at sea level, scale height, and an altitude-independent floor. */
   uFog: THREE.IUniform<THREE.Vector3>
@@ -48,31 +31,63 @@ export interface AtmosphereUniforms {
   uTime: THREE.IUniform<number>
 }
 
-export function createAtmosphereUniforms(): AtmosphereUniforms {
-  return {
-    uSunDir: { value: SUN_DIR.clone() },
-    uSunColor: { value: PALETTE.sun.clone() },
-    uZenith: { value: PALETTE.zenith.clone() },
-    uMidSky: { value: PALETTE.midSky.clone() },
-    uHorizonSun: { value: PALETTE.horizonSun.clone() },
-    uHorizonAway: { value: PALETTE.horizonAway.clone() },
-    uBelowHorizon: { value: PALETTE.belowHorizon.clone() },
-    uInCloudColor: { value: PALETTE.inCloud.clone() },
+export function createAtmosphereUniforms(look: SkyLook): AtmosphereUniforms {
+  const u: AtmosphereUniforms = {
+    uSunDir: { value: new THREE.Vector3() },
+    uSunColor: { value: new THREE.Color() },
+    uSunGlow: { value: new THREE.Color() },
+    uHalo: { value: new THREE.Vector3() },
+    uZenith: { value: new THREE.Color() },
+    uMidSky: { value: new THREE.Color() },
+    uHorizonSun: { value: new THREE.Color() },
+    uHorizonAway: { value: new THREE.Color() },
+    uBelowHorizon: { value: new THREE.Color() },
+    uHorizonPow: { value: 6 },
+    uInCloudColor: { value: new THREE.Color() },
+    uCloudShadow: { value: new THREE.Color() },
+    uCloudAmbient: { value: new THREE.Color() },
+    uSeaDeep: { value: new THREE.Color() },
+    uContrailShade: { value: new THREE.Color() },
     uCamPos: { value: new THREE.Vector3() },
-    uFog: { value: new THREE.Vector3(1.6e-4, 1300, 0.75e-5) },
+    uFog: { value: new THREE.Vector3() },
     uInCloud: { value: 0 },
     uTime: { value: 0 },
   }
+  applyLook(u, look)
+  return u
+}
+
+/** Copy a day's look into the shared uniforms (materials hold the same uniform objects). */
+export function applyLook(u: AtmosphereUniforms, look: SkyLook): void {
+  u.uSunDir.value.copy(look.sunDir)
+  u.uSunColor.value.copy(look.sun)
+  u.uSunGlow.value.copy(look.sunGlow)
+  u.uHalo.value.copy(look.halo)
+  u.uZenith.value.copy(look.zenith)
+  u.uMidSky.value.copy(look.midSky)
+  u.uHorizonSun.value.copy(look.horizonSun)
+  u.uHorizonAway.value.copy(look.horizonAway)
+  u.uBelowHorizon.value.copy(look.belowHorizon)
+  u.uHorizonPow.value = look.horizonPow
+  u.uInCloudColor.value.copy(look.inCloud)
+  u.uCloudShadow.value.copy(look.cloudShadow)
+  u.uCloudAmbient.value.copy(look.cloudAmbient)
+  u.uSeaDeep.value.copy(look.seaDeep)
+  u.uContrailShade.value.copy(look.contrailShade)
+  u.uFog.value.copy(look.fog)
 }
 
 export const ATMOSPHERE_GLSL = /* glsl */ `
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
+uniform vec3 uSunGlow;
+uniform vec3 uHalo;
 uniform vec3 uZenith;
 uniform vec3 uMidSky;
 uniform vec3 uHorizonSun;
 uniform vec3 uHorizonAway;
 uniform vec3 uBelowHorizon;
+uniform float uHorizonPow;
 uniform vec3 uInCloudColor;
 uniform vec3 uCamPos;
 uniform vec3 uFog;
@@ -88,12 +103,12 @@ vec3 skyColor(vec3 dir) {
   vec3 horizon = mix(uHorizonAway, uHorizonSun, sunSide * sunSide * sunSide);
   float up = max(y, 0.0);
   vec3 col = mix(uMidSky, uZenith, smoothstep(0.1, 0.9, up));
-  col = mix(col, horizon, pow(1.0 - up, 6.0));
+  col = mix(col, horizon, pow(1.0 - up, uHorizonPow));
   // Below the horizon: the haze thickens into the sea-level murk.
   col = mix(col, mix(horizon, uBelowHorizon, 0.55), smoothstep(0.0, -0.18, y));
   float mu = max(dot(dir, uSunDir), 0.0);
-  float glow = 0.1 * pow(mu, 4.0) + 0.45 * pow(mu, 32.0) + 1.2 * pow(mu, 600.0);
-  col += uSunColor * vec3(1.0, 0.85, 0.7) * glow * (0.3 + 0.7 * pow(1.0 - up, 3.0));
+  float glow = uHalo.x * pow(mu, 4.0) + uHalo.y * pow(mu, 32.0) + uHalo.z * pow(mu, 600.0);
+  col += uSunGlow * glow * (0.3 + 0.7 * pow(1.0 - up, 3.0));
   return mix(col, uInCloudColor, uInCloud);
 }
 

@@ -1,7 +1,7 @@
 // Clouds as instanced camera-facing soft puffs. One draw call, per-vertex aerial perspective,
 // per-fragment a single atlas fetch: cheap enough that overdraw of huge puffs is the only real cost.
 import * as THREE from 'three'
-import { ATMOSPHERE_GLSL, PALETTE, type AtmosphereUniforms } from '../atmosphere'
+import { ATMOSPHERE_GLSL, type AtmosphereUniforms } from '../atmosphere'
 import { ATLAS_TILES } from '../textures'
 import type { Puff } from './layout'
 
@@ -39,8 +39,6 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
     uniforms: {
       ...atmosphere,
       uAtlas: { value: atlas },
-      uShadowColor: { value: PALETTE.cloudShadow.clone() },
-      uAmbient: { value: PALETTE.cloudAmbient.clone() },
       uDepthRange: { value: DEPTH_RANGE },
     },
     vertexShader: /* glsl */ `
@@ -117,8 +115,8 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
       uniform sampler2D uAtlas;
       uniform vec3 uSunDir;
       uniform vec3 uSunColor;
-      uniform vec3 uShadowColor;
-      uniform vec3 uAmbient;
+      uniform vec3 uCloudShadow;
+      uniform vec3 uCloudAmbient;
       uniform float uInCloud;
       varying vec2 vUv;
       varying vec2 vTile;
@@ -174,7 +172,7 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
         float lambert = dot(n, uSunDir) * 0.35 + 0.65;
         float sunVis = shade * lambert * (1.0 - 0.8 * dark);
         // Ambient: blue-violet in the belly, sky-lit on top.
-        vec3 ambient = mix(uShadowColor * (1.0 - 0.5 * dark), uAmbient, smoothstep(0.0, 0.9, h) * (0.35 + 0.65 * shade));
+        vec3 ambient = mix(uCloudShadow * (1.0 - 0.5 * dark), uCloudAmbient, smoothstep(0.0, 0.9, h) * (0.35 + 0.65 * shade));
         vec3 col = ambient + uSunColor * sunVis * 1.3;
         // Thin parts glow: light leaks through edges, strongest when looking toward the sun.
         float thin = 1.0 - smoothstep(0.05, 0.6, t.a);

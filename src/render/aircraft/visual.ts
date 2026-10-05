@@ -58,7 +58,7 @@ export function createAircraftVisual(atmosphere: AtmosphereUniforms, glow: THREE
   const trails: Trail[] = [0, 1].map(() => ({
     ribbon: createRibbon(atmosphere, CONTRAIL_CAPACITY + 1, {
       color: new THREE.Color(1, 1, 1), opacity: 0.55, halfWidth: 1.5, growth: 0.45, life: CONTRAIL_CAPACITY * CONTRAIL_STEP_S,
-      minPx: 0.6, additive: false, haze: 1, lit: true, nearFade: 350,
+      minPx: 0.6, ink: 1, haze: 1, lit: true, nearFade: 350,
     }),
     points: new Float32Array((CONTRAIL_CAPACITY + 1) * 3),
     stamps: new Float32Array(CONTRAIL_CAPACITY + 1),

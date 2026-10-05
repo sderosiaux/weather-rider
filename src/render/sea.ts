@@ -1,13 +1,19 @@
 // Sea far below: the altitude reference. Sky reflection + sun glitter path + cloud shadows, then aerial haze.
 import * as THREE from 'three'
-import { ATMOSPHERE_GLSL, PALETTE, type AtmosphereUniforms } from './atmosphere'
+import { ATMOSPHERE_GLSL, type AtmosphereUniforms } from './atmosphere'
 
 export const MAX_SEA_SHADOWS = 32
 
+/** Floor of the along-sun squash: a shadow never stretches past 3× its width, however low the sun. */
+const MIN_SQUASH = 0.34
+
 export interface Sea {
   readonly mesh: THREE.Mesh
-  /** Soft shadow discs (x, z, radius, strength) under big clouds. */
-  setShadows(discs: readonly (readonly [number, number, number, number])[]): void
+  /**
+   * Soft cloud shadows: discs (x, z, radius, strength) already cast along the sun by the caller; the sea
+   * stretches them along the sun's bearing (long at a low sun, round at noon).
+   */
+  setShadows(discs: readonly (readonly [number, number, number, number])[], sunDir: THREE.Vector3): void
   /** Keep the (finite) plane centred under the camera. */
   follow(camera: THREE.Camera): void
   dispose(): void
@@ -22,7 +28,6 @@ export function createSea(atmosphere: AtmosphereUniforms, noise: THREE.Texture):
     uniforms: {
       ...atmosphere,
       uNoise: { value: noise },
-      uDeep: { value: PALETTE.seaDeep.clone() },
       uShadows: { value: shadows },
       uShadowCount: { value: 0 },
     },
@@ -37,7 +42,7 @@ export function createSea(atmosphere: AtmosphereUniforms, noise: THREE.Texture):
     fragmentShader: /* glsl */ `
       ${ATMOSPHERE_GLSL}
       uniform sampler2D uNoise;
-      uniform vec3 uDeep;
+      uniform vec3 uSeaDeep;
       uniform vec4 uShadows[${MAX_SEA_SHADOWS}];
       uniform int uShadowCount;
       varying vec3 vWorld;
@@ -61,18 +66,21 @@ export function createSea(atmosphere: AtmosphereUniforms, noise: THREE.Texture):
         float cosT = max(dot(-v, n), 0.0);
         float fresnel = 0.02 + 0.98 * pow(1.0 - cosT, 5.0);
 
+        // Shadow discs live in the sun's frame (along-sun axis squashed): one length() per disc, as before.
+        vec2 sunAxis = normalize(uSunDir.xz + vec2(1e-6, 0.0));
+        vec2 sq = vec2(dot(vWorld.xz, sunAxis) * max(uSunDir.y, ${MIN_SQUASH}), vWorld.x * sunAxis.y - vWorld.z * sunAxis.x);
         float shadow = 0.0;
         for (int i = 0; i < ${MAX_SEA_SHADOWS}; i++) {
           if (i >= uShadowCount) break;
           vec4 c = uShadows[i];
-          float d = length(vWorld.xz - c.xy) / c.z;
+          float d = length(sq - c.xy) / c.z;
           shadow = max(shadow, c.w * (1.0 - smoothstep(0.35, 1.0, d)));
         }
 
         vec3 sky = skyColor(r);
         float sunDot = max(dot(r, uSunDir), 0.0);
         vec3 glint = uSunColor * (pow(sunDot, 2400.0) * 30.0 + pow(sunDot, 120.0) * 0.5) * (1.0 - shadow);
-        vec3 body = uDeep + uSunColor * 0.02 * max(uSunDir.y, 0.0);
+        vec3 body = uSeaDeep + uSunColor * 0.02 * max(uSunDir.y, 0.0);
         vec3 col = mix(body, sky * (1.0 - 0.55 * shadow), fresnel) + glint;
         gl_FragColor = vec4(applyAerial(col, vWorld), 1.0);
         #include <tonemapping_fragment>
@@ -86,11 +94,16 @@ export function createSea(atmosphere: AtmosphereUniforms, noise: THREE.Texture):
 
   return {
     mesh,
-    setShadows(discs) {
+    setShadows(discs, sunDir) {
       const n = Math.min(discs.length, MAX_SEA_SHADOWS)
+      // Same frame as the shader: along the sun's bearing (squashed), across it.
+      const h = Math.hypot(sunDir.x + 1e-6, sunDir.z)
+      const ax = (sunDir.x + 1e-6) / h
+      const az = sunDir.z / h
+      const squash = Math.max(sunDir.y, MIN_SQUASH)
       for (let i = 0; i < n; i++) {
         const d = discs[i]!
-        shadows[i]!.set(d[0], d[1], d[2], d[3])
+        shadows[i]!.set((d[0] * ax + d[1] * az) * squash, d[0] * az - d[1] * ax, d[2], d[3])
       }
       material.uniforms.uShadowCount!.value = n
     },

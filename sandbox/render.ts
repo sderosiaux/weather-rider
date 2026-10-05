@@ -1,6 +1,11 @@
 // Render sandbox. URL params:
-//   t=<s>          freeze the fixture flight at sim time t (screenshots)
+//   t=<s>          freeze the flight at sim time t (screenshots)
 //   weather=fixture | rich (default: rich = fixture + a storm-season feature set, visuals only)
+//   scene=decisions   ghost-decision bench (render.decisions.ts): analytic sky, a surfer and a direct ghost
+//   lead=<s>       decisions scene: ghost clock ahead of the player's (default 120: the surfer mid-climb)
+//   sky=<elev>,<az>,<haze>,<warmth>   the day's light (WorldView.setSky); absent = the default look
+//   grid=<t>,<t>…  render SKY_PRESETS (rows) × these frozen times (columns) side by side, labelled
+//   tile=<w>x<h>   grid tile size (default 800x450)
 //   class=<AircraftClass>   alt=<m> altitude offset (contrails show above ~6500 m)
 //   clean=1        hide the panel
 //   showcase=<AircraftClass> | cycle   hangar trophy view (cycle: next class every 4 s; key S toggles)
@@ -16,14 +21,34 @@ import {
   fixtureFlightState,
   fixtureRoute,
 } from '../src/core/fixtures'
-import type { AircraftClass, AircraftSpec, AircraftState, Ghost, GhostSample, WeatherField, WeatherFeature } from '../src/core/types'
+import type { GhostVisual } from '../src/core/presentation'
+import type { AircraftClass, AircraftSpec, AircraftState, Ghost, GhostSample, SkyParams, WeatherField, WeatherFeature } from '../src/core/types'
 import { createWorldView } from '../src/render'
+import { createDecisionWeather, decisionPlayer, directGhost, surferGhost } from './render.decisions'
 
 const params = new URLSearchParams(location.search)
 const frozenT = params.has('t') ? Number(params.get('t')) : null
 const altOffset = Number(params.get('alt') ?? 0)
 const stress = Math.max(1, Number(params.get('stress') ?? 1))
+const decisions = params.get('scene') === 'decisions'
+const lead = decisions ? Number(params.get('lead') ?? 120) : 0
 if (params.get('clean') === '1') document.body.classList.add('clean')
+
+/** The brief's six days plus a storm-heavy afternoon: every one must be beautiful, not just different. */
+const SKY_PRESETS: readonly SkyParams[] = [
+  { sunElevationDeg: 6, sunAzimuthDeg: 70, haze: 0.5, warmth: 0.9 },
+  { sunElevationDeg: 12, sunAzimuthDeg: 110, haze: 0.4, warmth: 0.7 },
+  { sunElevationDeg: 20, sunAzimuthDeg: 150, haze: 0.3, warmth: 0.4 },
+  { sunElevationDeg: 38, sunAzimuthDeg: 180, haze: 0.2, warmth: 0.1 },
+  { sunElevationDeg: 10, sunAzimuthDeg: 250, haze: 0.6, warmth: 0.8 },
+  { sunElevationDeg: 25, sunAzimuthDeg: 40, haze: 0.7, warmth: 0.3 },
+]
+
+const parseSky = (s: string | null): SkyParams | null => {
+  const n = s?.split(',').map(Number)
+  if (!n || n.length !== 4 || !n.every(Number.isFinite)) return null
+  return { sunElevationDeg: n[0]!, sunAzimuthDeg: n[1]!, haze: n[2]!, warmth: n[3]! }
+}
 
 const CLASSES: readonly { cls: AircraftClass; lengthM: number; cruise: number; livery: string }[] = [
   { cls: 'turboprop', lengthM: 27, cruise: 140, livery: '#c8553d' },
@@ -70,9 +95,12 @@ function poseAt(ghost: Ghost, t: number): GhostSample {
 
 const canvas = document.getElementById('view') as HTMLCanvasElement
 const view = createWorldView(canvas)
-const weather = params.get('weather') === 'fixture' ? createFixtureWeather(1) : richWeather()
+;(window as unknown as { __view: typeof view }).__view = view
+const weather = decisions ? createDecisionWeather() : params.get('weather') === 'fixture' ? createFixtureWeather(1) : richWeather()
 view.setWeather(weather)
 view.setRoute(fixtureRoute)
+const sky = parseSky(params.get('sky'))
+if (sky) view.setSky(sky)
 
 const select = document.getElementById('class') as HTMLSelectElement
 for (const c of CLASSES) select.add(new Option(c.cls, c.cls))
@@ -106,47 +134,93 @@ window.addEventListener('keydown', (e) => {
   }
 })
 
-const ghost = createFixtureGhost(3)
-view.setGhosts([{ ghost, spec: fixtureAircraft, color: '#ffc46b', showTrail: true }])
-
-const resize = (): void => view.resize(window.innerWidth, window.innerHeight)
-window.addEventListener('resize', resize)
-resize()
+// Ghost colours as the game shell assigns them (src/game/app.ts GHOST_COLORS).
+const ghosts: readonly GhostVisual[] = decisions
+  ? [
+      { ghost: surferGhost(), spec: fixtureAircraft, color: '#f4b860', showTrail: true },
+      { ghost: directGhost(), spec: fixtureAircraft, color: '#8ec5ff', showTrail: true },
+    ]
+  : [{ ghost: createFixtureGhost(3), spec: fixtureAircraft, color: '#ffc46b', showTrail: true }]
+view.setGhosts(ghosts)
 
 const level = params.get('level') === '1'
 const stateAt = (t: number): AircraftState => {
+  if (decisions) return decisionPlayer(t)
   const s = fixtureFlightState(t)
   const orientation = level ? qFromAxisAngle(v3(0, 1, 0), Math.atan2(-s.vel.z, s.vel.x)) : s.orientation
   return { ...s, orientation, pos: v3(s.pos.x, s.pos.y + altOffset, s.pos.z) }
 }
+const ghostPosesAt = (t: number): GhostSample[] =>
+  ghosts.map(({ ghost }) => {
+    const p = poseAt(ghost, t + lead)
+    return altOffset ? { ...p, pos: v3(p.pos.x, p.pos.y + altOffset, p.pos.z) } : p
+  })
 
-const fpsEl = document.getElementById('fps')!
-const infoEl = document.getElementById('info')!
-let simT = frozenT ?? 20
-let last = performance.now()
-let frames = 0
-let fpsWindowStart = last
-const stats = { fps: 0, frameMs: 0 }
-;(window as unknown as { __render: typeof stats }).__render = stats
+const gridTimes = params.get('grid')?.split(',').map(Number).filter(Number.isFinite) ?? []
+if (gridTimes.length > 0) renderGrid(gridTimes)
+else startLoop()
 
-const loop = (now: number): void => {
-  const dtReal = Math.min((now - last) / 1000, 0.1)
-  last = now
-  if (frozenT === null) simT += dtReal
-  const state = stateAt(simT)
-  const ghostPose = poseAt(ghost, simT)
-  view.update({ state, ghostPoses: [altOffset ? { ...ghostPose, pos: v3(ghostPose.pos.x, ghostPose.pos.y + altOffset, ghostPose.pos.z) } : ghostPose], dtReal })
-  const t0 = performance.now()
-  for (let i = 0; i < stress; i++) view.render()
-  frames++
-  if (now - fpsWindowStart > 1000) {
-    stats.fps = (frames * 1000) / (now - fpsWindowStart)
-    stats.frameMs = performance.now() - t0
-    fpsEl.textContent = `${stats.fps.toFixed(0)} fps`
-    infoEl.textContent = `t=${simT.toFixed(0)}s  alt=${state.pos.y.toFixed(0)}m  ${canvas.width}×${canvas.height}`
-    frames = 0
-    fpsWindowStart = now
+/** Every preset sky × every frozen time, into one labelled 2D canvas (one screenshot compares them all). */
+function renderGrid(times: readonly number[]): void {
+  const [tw, th] = (params.get('tile') ?? '800x450').split('x').map(Number) as [number, number]
+  const out = document.createElement('canvas')
+  out.width = tw * times.length
+  out.height = th * SKY_PRESETS.length
+  out.style.cssText = `display:block;width:${out.width}px;height:${out.height}px`
+  const ctx = out.getContext('2d')!
+  canvas.style.display = 'none'
+  document.body.style.overflow = 'auto'
+  document.body.appendChild(out)
+  view.resize(tw, th)
+  SKY_PRESETS.forEach((preset, row) => {
+    view.setSky(preset)
+    times.forEach((t, col) => {
+      // Settle the chase camera's bank follow and the in-cloud fade on the frozen frame.
+      for (let i = 0; i < 40; i++) view.update({ state: stateAt(t), ghostPoses: ghostPosesAt(t), dtReal: 0.1 })
+      view.render()
+      ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, col * tw, row * th, tw, th)
+      ctx.font = '13px ui-monospace, Menlo, monospace'
+      ctx.fillStyle = 'rgba(15, 20, 30, 0.55)'
+      ctx.fillRect(col * tw + 8, row * th + 8, 292, 22)
+      ctx.fillStyle = '#fff'
+      ctx.fillText(`elev ${preset.sunElevationDeg}° az ${preset.sunAzimuthDeg}° haze ${preset.haze} warmth ${preset.warmth} · t=${t}`, col * tw + 14, row * th + 24)
+    })
+  })
+  ;(window as unknown as { __gridDone: boolean }).__gridDone = true
+}
+
+function startLoop(): void {
+  const resize = (): void => view.resize(window.innerWidth, window.innerHeight)
+  window.addEventListener('resize', resize)
+  resize()
+
+  const fpsEl = document.getElementById('fps')!
+  const infoEl = document.getElementById('info')!
+  let simT = frozenT ?? 20
+  let last = performance.now()
+  let frames = 0
+  let fpsWindowStart = last
+  const stats = { fps: 0, frameMs: 0 }
+  ;(window as unknown as { __render: typeof stats }).__render = stats
+
+  const loop = (now: number): void => {
+    const dtReal = Math.min((now - last) / 1000, 0.1)
+    last = now
+    if (frozenT === null) simT += dtReal
+    const state = stateAt(simT)
+    view.update({ state, ghostPoses: ghostPosesAt(simT), dtReal })
+    const t0 = performance.now()
+    for (let i = 0; i < stress; i++) view.render()
+    frames++
+    if (now - fpsWindowStart > 1000) {
+      stats.fps = (frames * 1000) / (now - fpsWindowStart)
+      stats.frameMs = performance.now() - t0
+      fpsEl.textContent = `${stats.fps.toFixed(0)} fps`
+      infoEl.textContent = `t=${simT.toFixed(0)}s  alt=${state.pos.y.toFixed(0)}m  ${canvas.width}×${canvas.height}`
+      frames = 0
+      fpsWindowStart = now
+    }
+    requestAnimationFrame(loop)
   }
   requestAnimationFrame(loop)
 }
-requestAnimationFrame(loop)

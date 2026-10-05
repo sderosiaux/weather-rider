@@ -1,13 +1,24 @@
-// Ghosts: translucent glowing airframes + optional full-route trail line.
+// Ghosts: translucent glowing airframes + optional full-route trail line, tinted by the air the ghost
+// flew through so its decisions read from the chase view (SPEC §7).
 import * as THREE from 'three'
 import type { GhostVisual } from '../core/presentation'
-import type { GhostSample } from '../core/types'
+import type { GhostSample, WeatherField } from '../core/types'
 import { ATMOSPHERE_GLSL, type AtmosphereUniforms } from './atmosphere'
 import { buildAircraft } from './aircraft/models'
 import { createRibbon, type Ribbon } from './ribbon'
+import { airTints } from './trailAir'
 
 /** Trail keeps one ghost sample in TRAIL_STRIDE (10 Hz → 2 Hz, ~75 m spacing at cruise). */
 const TRAIL_STRIDE = 5
+/** Calm stretches of a trail: the ghost's colour washed toward white, so the air's hues own the saturation. */
+const CALM_WASH = 0.45
+
+interface Trail {
+  readonly ribbon: Ribbon
+  readonly points: Float32Array
+  readonly stamps: Float32Array
+  readonly count: number
+}
 
 interface GhostEntry {
   readonly root: THREE.Group
@@ -16,12 +27,14 @@ interface GhostEntry {
   readonly beacon: THREE.Points
   readonly beaconMat: THREE.PointsMaterial
   readonly beaconGeo: THREE.BufferGeometry
-  readonly trail: Ribbon | null
+  readonly trail: Trail | null
 }
 
 export interface GhostLayer {
   readonly group: THREE.Group
-  set(ghosts: readonly GhostVisual[]): void
+  /** weather: the field the trails are read against (null = not known yet: calm trails until setWeather). */
+  set(ghosts: readonly GhostVisual[], weather: WeatherField | null): void
+  setWeather(weather: WeatherField): void
   update(poses: readonly GhostSample[]): void
   setPixelAngle(a: number): void
   dispose(): void
@@ -76,8 +89,8 @@ export function createGhostLayer(atmosphere: AtmosphereUniforms, glow: THREE.Tex
       e.beaconMat.dispose()
       e.beaconGeo.dispose()
       if (e.trail) {
-        group.remove(e.trail.mesh)
-        e.trail.dispose()
+        group.remove(e.trail.ribbon.mesh)
+        e.trail.ribbon.dispose()
       }
     }
     entries = []
@@ -85,9 +98,13 @@ export function createGhostLayer(atmosphere: AtmosphereUniforms, glow: THREE.Tex
     airframes = new Map()
   }
 
+  const tint = (trail: Trail, weather: WeatherField | null): void => {
+    trail.ribbon.setTints(weather ? airTints(trail.points, trail.stamps, trail.count, weather) : new Float32Array(trail.count * 4), trail.count)
+  }
+
   return {
     group,
-    set(ghosts) {
+    set(ghosts, weather) {
       clear()
       entries = ghosts.map((g) => {
         const key = `${g.spec.class}:${g.spec.lengthM}`
@@ -112,7 +129,7 @@ export function createGhostLayer(atmosphere: AtmosphereUniforms, glow: THREE.Tex
         root.add(beacon)
         group.add(root)
 
-        let trail: Ribbon | null = null
+        let trail: Trail | null = null
         if (g.showTrail && g.ghost.samples.length > 1) {
           const samples = g.ghost.samples
           const n = Math.ceil(samples.length / TRAIL_STRIDE) + 1
@@ -129,12 +146,15 @@ export function createGhostLayer(atmosphere: AtmosphereUniforms, glow: THREE.Tex
             pts.set([last.pos.x, last.pos.y, last.pos.z], k * 3)
             stamps[k++] = last.t
           }
-          trail = createRibbon(atmosphere, n, {
-            color, opacity: 0.4, halfWidth: 2, growth: 0, life: 0, minPx: 1.1, additive: true, haze: 0.55, lit: false, nearFade: 2500,
+          const calm = color.clone().lerp(new THREE.Color(1, 1, 1), CALM_WASH)
+          const ribbon = createRibbon(atmosphere, n, {
+            color: calm, opacity: 0.4, halfWidth: 2, growth: 0, life: 0, minPx: 1.1, ink: 0.15, haze: 0.55, lit: false, nearFade: 2500,
           })
-          trail.set(pts, stamps, k)
-          trail.setPixelAngle(pixelAngle)
-          group.add(trail.mesh)
+          ribbon.set(pts, stamps, k)
+          ribbon.setPixelAngle(pixelAngle)
+          group.add(ribbon.mesh)
+          trail = { ribbon, points: pts, stamps, count: k }
+          tint(trail, weather)
         }
         return { root, body, material, beacon, beaconMat, beaconGeo, trail }
       })
@@ -146,12 +166,15 @@ export function createGhostLayer(atmosphere: AtmosphereUniforms, glow: THREE.Tex
         if (!p) return
         e.root.position.set(p.pos.x, p.pos.y, p.pos.z)
         e.root.quaternion.set(p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w)
-        e.trail?.setTime(p.t, p.t)
+        e.trail?.ribbon.setTime(p.t, p.t)
       })
+    },
+    setWeather(weather) {
+      for (const e of entries) if (e.trail) tint(e.trail, weather)
     },
     setPixelAngle(a) {
       pixelAngle = a
-      for (const e of entries) e.trail?.setPixelAngle(a)
+      for (const e of entries) e.trail?.ribbon.setPixelAngle(a)
     },
     dispose() {
       clear()
