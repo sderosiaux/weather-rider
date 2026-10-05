@@ -25,7 +25,7 @@ export const AIRCRAFT_UNLOCKS: Readonly<Record<AircraftId, { readonly flights: n
   experimental: { flights: 20, best: { smooth: 1300, speed: 1150, eco: 1300 } },
 }
 
-const LIVERY_RE = /^#[0-9a-f]{6}$/i
+export const LIVERY_RE = /^#[0-9a-f]{6}$/i
 
 export function newProgress(pilot: string): PlayerProgress {
   return {
@@ -120,6 +120,11 @@ export function recordFlight(
   }
 }
 
+/** Own keys only: progress comes from storage, and an id like "constructor" must not reach Object.prototype. */
+export function loadoutOf(progress: PlayerProgress, aircraftId: string): readonly string[] {
+  return Object.hasOwn(progress.loadouts, aircraftId) ? progress.loadouts[aircraftId]! : []
+}
+
 function requireAircraft(progress: PlayerProgress, aircraftId: string): void {
   if (!progress.unlockedAircraft.includes(aircraftId)) throw new Error(`aircraft "${aircraftId}" is locked`)
 }
@@ -130,16 +135,14 @@ export function equip(progress: PlayerProgress, aircraftId: string, upgradeId: s
   const u = findUpgrade(upgradeId)
   if (!u) throw new Error(`unknown upgrade "${upgradeId}"`)
   if (!progress.unlockedUpgrades.includes(upgradeId)) throw new Error(`upgrade "${upgradeId}" is locked`)
-  const current = progress.loadouts[aircraftId] ?? []
-  const next = [...current.filter((id) => findUpgrade(id)?.slot !== u.slot), upgradeId]
+  const next = [...loadoutOf(progress, aircraftId).filter((id) => findUpgrade(id)?.slot !== u.slot), upgradeId]
   return { ...progress, loadouts: { ...progress.loadouts, [aircraftId]: next } }
 }
 
 /** Pure. Empties a slot (the hangar needs a way back to stock). */
 export function unequip(progress: PlayerProgress, aircraftId: string, upgradeId: string): PlayerProgress {
   requireAircraft(progress, aircraftId)
-  const current = progress.loadouts[aircraftId] ?? []
-  return { ...progress, loadouts: { ...progress.loadouts, [aircraftId]: current.filter((id) => id !== upgradeId) } }
+  return { ...progress, loadouts: { ...progress.loadouts, [aircraftId]: loadoutOf(progress, aircraftId).filter((id) => id !== upgradeId) } }
 }
 
 /** Pure. Color is a free choice ("#rrggbb"), only the aircraft must be unlocked. */
@@ -180,7 +183,6 @@ export function unlockHints(progress: PlayerProgress): Readonly<Record<string, s
 
 /** Unequip whatever occupies `slot` on this aircraft (back to stock). */
 export function unequipSlot(progress: PlayerProgress, aircraftId: string, slot: UpgradeSlot): PlayerProgress {
-  const current = progress.loadouts[aircraftId] ?? []
-  const inSlot = current.find((id) => findUpgrade(id)?.slot === slot)
+  const inSlot = loadoutOf(progress, aircraftId).find((id) => findUpgrade(id)?.slot === slot)
   return inSlot ? unequip(progress, aircraftId, inSlot) : progress
 }
