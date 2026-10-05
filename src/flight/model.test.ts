@@ -3,7 +3,7 @@ import { SIM_DT } from '../core/constants'
 import { createFixtureWeather, fixtureRoute } from '../core/fixtures'
 import { qFromAxisAngle, v3 } from '../core/math'
 import { createRng } from '../core/rng'
-import type { AircraftState, Controls, MutableWeatherSample, Route, Vec3, WeatherField, WeatherSample } from '../core/types'
+import type { AircraftSpec, AircraftState, Controls, MutableWeatherSample, Route, Vec3, WeatherField, WeatherSample } from '../core/types'
 import { aeroOf, equilibriumAirspeed, trimLevel } from './aero'
 import { AIRCRAFT, aircraftById } from './aircraft'
 import { bankAngle, flightModel, headingOf } from './model'
@@ -117,6 +117,38 @@ describe('weather is terrain', () => {
       else if (after === 0 && s.pos.x > 2150) after = s.airspeed
     })
     expect(after - before).toBeGreaterThan(15)
+  })
+})
+
+describe('power changes vertical speed, not attitude', () => {
+  const step = (spec: AircraftSpec, from: number, to: number) => {
+    const s0 = { ...flightModel.initialState(spec, fixtureRoute, still), throttle: from }
+    let maxRise = -Infinity
+    const vario: number[] = []
+    const end = fly(spec, s0, (s) => NEUTRAL(s.t < 5 ? from : to), still, fixtureRoute, 90, (s) => {
+      if (s.t >= 5) maxRise = Math.max(maxRise, s.pos.y - s0.pos.y)
+      vario.push(s.vel.y)
+    })
+    return { s0, end, maxRise, vario }
+  }
+
+  it.each(AIRCRAFT.map((a) => [a.id, a] as const))('%s: hands-off throttle 0.8 → 0.3 never climbs, settles into a descent', (_id, spec) => {
+    const { s0, end, maxRise, vario } = step(spec, 0.8, 0.3)
+    expect(maxRise).toBeLessThan(30)
+    expect(end.status).toBe('flying')
+    // Descending for the last 60 s, airspeed eased off but not collapsed.
+    expect(Math.max(...vario.slice(30 * 60))).toBeLessThan(-0.5)
+    expect(end.airspeed).toBeGreaterThan(0.7 * s0.airspeed)
+  })
+
+  it.each(AIRCRAFT.map((a) => [a.id, a] as const))('%s: hands-off throttle up settles into a climb without a phugoid', (_id, spec) => {
+    const { s0, end, vario } = step(spec, 0.5, 1)
+    const late = vario.slice(30 * 60)
+    expect(Math.min(...late)).toBeGreaterThan(0.5)
+    // Vario changes smoothly: no oscillation bigger than a few m/s once established.
+    expect(Math.max(...late) - Math.min(...late)).toBeLessThan(5)
+    expect(end.pos.y).toBeGreaterThan(s0.pos.y + 100)
+    expect(Math.abs(end.airspeed - s0.airspeed)).toBeLessThan(0.15 * s0.airspeed)
   })
 })
 

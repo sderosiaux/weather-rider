@@ -1,0 +1,333 @@
+// Semi-arcade 6DOF. Translational motion is real aerodynamics on the air-relative velocity,
+// so updrafts, jets, downdrafts and shear act through angle of attack and airspeed, never by
+// special case. Rotation is rate-commanded: the nose follows the flight path, and a restoring term
+// pulls angle of attack toward a "hold" value: 1 g along the current path (bank-compensated), plus
+// a speed hold. Hands off, the aircraft keeps its airspeed: surplus or missing energy — a power
+// change, rising or sinking air — goes into vertical speed, not speed. The held speed drifts slowly
+// (minutes) toward the airspeed the current thrust sustains in level flight, so idle ends up at
+// best glide and full power at top speed without the nose ever rising when you cut power.
+// A weathervane term kills sideslip.
+import { GRAVITY, SEVERE_TURBULENCE } from '../src/core/constants'
+import {
+  BODY_FORWARD,
+  BODY_RIGHT,
+  BODY_UP,
+  add,
+  clamp,
+  cross,
+  dot,
+  length,
+  lerp,
+  normalize,
+  qConjugate,
+  qFromAxisAngle,
+  qMul,
+  qNormalize,
+  qRotate,
+  scale,
+  smoothstep,
+  sub,
+  v3,
+} from '../src/core/math'
+import { hashInts } from '../src/core/rng'
+import type { AircraftSpec, AircraftState, Controls, FlightModel, MutableWeatherSample, Route, Vec3, WeatherField } from '../src/core/types'
+import {
+  CL0,
+  CL_ALPHA,
+  aeroOf,
+  airDensity,
+  currentMass,
+  dragCoeff,
+  equilibriumAirspeed,
+  liftCoeff,
+  thrustLapse,
+  trimLevel,
+} from '../src/flight/aero'
+
+/** Engine spool: fraction of full throttle per second. */
+const THROTTLE_RATE = 0.5
+const SIDE_FORCE_PER_RAD = 0.8
+/** Bank compensation of the flight-path hold is capped at this extra load factor. */
+const MAX_BANK_COMPENSATION = 0.75
+/** Weak spiral stability (rad/s at 45° bank) so gusts don't random-walk the bank angle. */
+const WINGS_LEVELING = 0.12
+/**
+ * The held speed drifts toward the thrust-equilibrium airspeed with this time constant (s), but the drift
+ * may use at most SPEED_SHARE of the current excess (or missing) thrust: the rest goes into climb (or
+ * descent). A power cut therefore always descends, and speed follows power slowly.
+ */
+const SPEED_DRIFT_TIME = 30
+const SPEED_SHARE = 0.35
+/**
+ * Rising air lets an aircraft faster than its power sustains shed the excess sooner, into height: shedding
+ * may add this share of the vertical wind to the climb. The air lifts it anyway, so a power cut never reads
+ * as a climb; it is what lets a glider that cut power soar through a thermal hands off.
+ */
+const LIFT_SHEDDING = 0.35
+/**
+ * Speed-hold response, in load factor per g of unwanted tangential acceleration: gentle up to HOLD_KNEE,
+ * which is what a power change asks for (the nose eases over), firm beyond (a steep path after a manoeuvre).
+ */
+const HOLD_GAIN = 2.5
+const HOLD_KNEE = 0.15
+const HOLD_FIRM_GAIN = 1.5
+const HOLD_MAX = 0.4
+/**
+ * Envelope protection: below ENVELOPE_LOW × the (bank-adjusted) stall speed, or above the fastest level
+ * flight at full power, the hold brings the airspeed back inside within ENVELOPE_TIME (s), trading height for
+ * it. A power change never leaves the envelope, so it never triggers this.
+ */
+const ENVELOPE_LOW = 1.2
+const ENVELOPE_TIME = 5
+/**
+ * Peak gust amplitudes at turbulence 1 and gustSensitivity 1. Pitch gusts are expressed as load
+ * factor (then converted to an angle-of-attack kick for the current q), otherwise a fast, highly
+ * loaded wing would feel the same rate kick as g-forces several times larger.
+ */
+const GUST_ACCEL = 5
+const GUST_LOAD = 0.3
+const GUST_ROLL = 0.35
+const GUST_YAW = 0.06
+/** Stress per second when |g| sits at the structural limit. Starts at 70% of it. */
+const G_STRESS_RATE = 0.08
+const G_STRESS_ONSET = 0.7
+/**
+ * Fatigue per second in severe turbulence at TURBULENCE_REF_SPEED. Gust loads grow with airspeed, so the rate scales
+ * with V: every airframe pays about the same for crossing the same storm core (slow ones stay in it longer).
+ * Tuned by the balance lab: a straight pass through an extreme core costs 10–30 %.
+ */
+const TURBULENCE_STRESS_RATE = 0.0033
+const TURBULENCE_REF_SPEED = 222
+const INSTANT_FAILURE_FACTOR = 1.5
+/** Diving beyond the fastest level-flight dynamic pressure loads the airframe too. */
+const OVERSPEED_STRESS_RATE = 0.1
+const OVERSPEED_MARGIN = 0.15
+const MIN_AERO_SPEED = 1
+
+const scratch: MutableWeatherSample = { wind: { x: 0, y: 0, z: 0 }, turbulence: 0, dominant: null, cloud: 0 }
+
+const knot = (seed: number, axis: number, i: number): number => (hashInts(seed, axis, i) / 4294967296) * 2 - 1
+
+/** Smooth deterministic noise in [-1, 1], knots every `period` ticks. */
+function tickNoise(seed: number, axis: number, tick: number, period: number): number {
+  const s = tick / period
+  const i = Math.floor(s)
+  const f = s - i
+  return lerp(knot(seed, axis, i), knot(seed, axis, i + 1), f * f * (3 - 2 * f))
+}
+
+/** ~1.5 Hz body with a ~4.5 Hz chop. */
+const gustNoise = (seed: number, axis: number, tick: number): number =>
+  0.7 * tickNoise(seed, axis, tick, 40) + 0.3 * tickNoise(seed, axis + 16, tick, 13)
+
+/** Bank angle, positive = right wing down. */
+export function bankAngle(orientation: AircraftState['orientation']): number {
+  const right = qRotate(orientation, BODY_RIGHT)
+  const up = qRotate(orientation, BODY_UP)
+  return Math.atan2(-right.y, up.y)
+}
+
+/** Heading in radians, 0 = east, positive = toward north (−z), matching positive yaw about +y. */
+export function headingOf(orientation: AircraftState['orientation']): number {
+  const f = qRotate(orientation, BODY_FORWARD)
+  return Math.atan2(-f.z, f.x)
+}
+
+/** Trimmed for cruise airspeed along startHeading; the ground velocity includes the wind at the start. */
+export type TrimState = AircraftState & { readonly trimAirspeed: number }
+export const TP = { RESTORE: 1 }
+Object.assign(TP, JSON.parse(process.env.TRIMP ?? "{}"))
+
+export function initialState(spec: AircraftSpec, route: Route, weather: WeatherField): AircraftState {
+  const w = weather.sample(route.start, 0, scratch).wind
+  const wind = v3(w.x, w.y, w.z)
+  const h = normalize(v3(route.startHeading.x, 0, route.startHeading.z))
+  const dir = length(h) > 0 ? h : BODY_FORWARD
+  const trim = trimLevel(spec, route.start.y, spec.cruiseSpeedMs)
+  const yaw = qFromAxisAngle(BODY_UP, Math.atan2(-dir.z, dir.x))
+  const orientation = qMul(yaw, qFromAxisAngle(BODY_RIGHT, trim.alpha))
+  const throttle = clamp(trim.throttle, 0, 1)
+  return {
+    t: 0,
+    pos: route.start,
+    vel: add(scale(dir, spec.cruiseSpeedMs), wind),
+    orientation,
+    angVel: v3(0, 0, 0),
+    airspeed: spec.cruiseSpeedMs,
+    throttle,
+    fuelKg: spec.fuelCapacityKg,
+    gLoad: 1,
+    cabinAccel: 0,
+    stress: 0,
+    stalled: false,
+    status: 'flying',
+    trimAirspeed: spec.cruiseSpeedMs,
+  } as TrimState
+}
+
+/** Drag in straight, level, 1 g flight at this dynamic pressure × wing area. */
+function levelDrag(aero: ReturnType<typeof aeroOf>, qs: number, weight: number): number {
+  const cl = weight / qs
+  return qs * (aero.cd0 + aero.k * cl * cl)
+}
+
+/** Load factor the speed hold adds against `err` g of unwanted tangential acceleration. */
+function holdResponse(err: number): number {
+  const x = Math.abs(err)
+  return Math.sign(err) * Math.min(Math.min(HOLD_GAIN * x, HOLD_KNEE) + HOLD_FIRM_GAIN * Math.max(0, x - HOLD_KNEE), HOLD_MAX)
+}
+
+function inGate(pos: Vec3, route: Route): boolean {
+  const dx = pos.x - route.gate.x
+  const dz = pos.z - route.gate.z
+  return dx * dx + dz * dz <= route.gateRadius * route.gateRadius && pos.y >= route.gateMinAlt && pos.y <= route.gateMaxAlt
+}
+
+export function step(
+  spec: AircraftSpec,
+  state: AircraftState,
+  controls: Controls,
+  weather: WeatherField,
+  route: Route,
+  dt: number,
+): AircraftState {
+  if (state.status !== 'flying') return state
+  const aero = aeroOf(spec)
+  const tick = Math.round(state.t / dt)
+  const w = weather.sample(state.pos, state.t, scratch)
+  const wind = v3(w.wind.x, w.wind.y, w.wind.z)
+  const turbulence = clamp(w.turbulence, 0, 1)
+  const q = state.orientation
+  const qInv = qConjugate(q)
+
+  const throttleCmd = clamp(controls.throttle, 0, 1)
+  const throttleStep = THROTTLE_RATE * dt
+  const throttle = clamp(throttleCmd, state.throttle - throttleStep, state.throttle + throttleStep)
+  // Fuel flow follows delivered thrust: thin air takes less fuel for the same throttle.
+  const fuelKg = Math.max(0, state.fuelKg - spec.fuelBurnFullKgS * throttle * thrustLapse(state.pos.y) * dt)
+  const mass = currentMass(spec, state.fuelKg)
+  const weight = mass * GRAVITY
+
+  // ── Aerodynamics on air-relative velocity ──
+  const airVel = sub(state.vel, wind)
+  const V = length(airVel)
+  const vb = qRotate(qInv, airVel)
+  const alpha = V > MIN_AERO_SPEED ? Math.atan2(-vb.y, vb.x) : 0
+  const beta = V > MIN_AERO_SPEED ? Math.asin(clamp(vb.z / V, -1, 1)) : 0
+  const rho = airDensity(state.pos.y)
+  const qDyn = 0.5 * rho * V * V
+  const qs = qDyn * spec.wingAreaM2
+  const cl = liftCoeff(aero, alpha)
+  const cd = dragCoeff(aero, alpha, cl, beta)
+  const thrust = state.fuelKg > 0 ? throttle * spec.maxThrustN * thrustLapse(state.pos.y) : 0
+
+  const seed = weather.seed
+  const gustAmp = turbulence * spec.gustSensitivity
+  const gustAccel = GUST_ACCEL * gustAmp * gustNoise(seed, 0, tick)
+
+  let fBody = v3(thrust, mass * gustAccel, 0)
+  if (V > MIN_AERO_SPEED) {
+    const vHat = scale(vb, 1 / V)
+    const liftDir = normalize(cross(BODY_RIGHT, vHat))
+    fBody = add(fBody, scale(liftDir, qs * cl))
+    fBody = add(fBody, scale(vHat, -qs * cd))
+    fBody = add(fBody, v3(0, 0, -qs * SIDE_FORCE_PER_RAD * beta))
+  }
+  const gLoad = fBody.y / weight
+  const accel = add(scale(qRotate(q, fBody), 1 / mass), v3(0, -GRAVITY, 0))
+
+  // ── Rotation: rate command + path following + stability, through a first-order lag ──
+  const bank = bankAngle(q)
+  const cosBank = Math.cos(bank)
+  const sinBank = Math.sin(bank)
+  const gamma = V > MIN_AERO_SPEED ? Math.asin(clamp(airVel.y / V, -1, 1)) : 0
+  const compensation =
+    cosBank > 0 ? Math.min((sinBank * sinBank) / cosBank, MAX_BANK_COMPENSATION) * smoothstep(0, 0.3, cosBank) : 0
+  const pitchCmd = clamp(controls.pitch, -1, 1)
+  const rollCmd = clamp(controls.roll, -1, 1)
+  const yawCmd = clamp(controls.yaw, -1, 1)
+  // The speed hold yields to the pilot: a held stick means "I want this path", not "fight me".
+  const vRef = equilibriumAirspeed(spec, state.pos.y, thrust, mass)
+  const tangentialG = V > MIN_AERO_SPEED ? dot(accel, airVel) / (V * GRAVITY) : 0
+  const excessAccel = qs > 1 ? (thrust - levelDrag(aero, qs, weight)) / mass : 0
+  const liftShedAccel = V > MIN_AERO_SPEED ? (LIFT_SHEDDING * GRAVITY * Math.max(0, wind.y)) / V : 0
+  // Slowing draws only on missing thrust (and rising air); speeding up on the thrust surplus, or on the
+  // deficit behind the drag curve, where diving is the only way back to speed.
+  const vLow = ENVELOPE_LOW * Math.sqrt((2 * weight) / (rho * spec.wingAreaM2 * aero.clMax * Math.max(cosBank, 0.5)))
+  const vHigh = equilibriumAirspeed(spec, state.pos.y, spec.maxThrustN * thrustLapse(state.pos.y), mass)
+  const trim0 = (state as TrimState).trimAirspeed ?? V
+  const qsTrim = 0.5 * rho * trim0 * trim0 * spec.wingAreaM2
+  const trimExcess = qsTrim > 1 ? (thrust - levelDrag(aero, qsTrim, weight)) / mass : 0
+  const liftShedTrim = (LIFT_SHEDDING * GRAVITY * Math.max(0, wind.y)) / Math.max(trim0, MIN_AERO_SPEED)
+  const trimRate = clamp((vRef - trim0) / SPEED_DRIFT_TIME, -SPEED_SHARE * Math.max(0, -trimExcess) - liftShedTrim, SPEED_SHARE * Math.abs(trimExcess))
+  const trim = clamp(trim0 + trimRate * dt, vLow, vHigh)
+  void excessAccel
+  void liftShedAccel
+  let holdAccel = trimRate + (TP.RESTORE * GRAVITY * (trim - V)) / Math.max(trim, MIN_AERO_SPEED)
+  if (V < vLow) holdAccel = Math.max(holdAccel, (vLow - V) / ENVELOPE_TIME)
+  else if (V > vHigh) holdAccel = Math.min(holdAccel, (vHigh - V) / ENVELOPE_TIME)
+  const speedCorrection = holdResponse(tangentialG - holdAccel / GRAVITY) * (1 - Math.abs(pitchCmd))
+  const nHold = Math.cos(gamma) * (cosBank + compensation) + speedCorrection
+  const alphaHold =
+    qs > 1
+      ? clamp(((nHold * weight - thrust * Math.sin(alpha)) / qs - CL0) / CL_ALPHA, 0.9 * aero.alphaStallNeg, 0.9 * aero.alphaStall)
+      : alpha
+  const pathRate = V > MIN_AERO_SPEED ? qRotate(qInv, scale(cross(airVel, accel), 1 / (V * V))) : v3(0, 0, 0)
+  // Scaled so full stick asks for about the same load factor at any speed and weight.
+  const pitchAuthority =
+    qDyn > 1 ? Math.min(spec.pitchRate, (aero.pitchAuthority * aero.cruiseQ * mass) / (qDyn * spec.massKg)) : spec.pitchRate
+
+  const gustAlpha = qs > 1 ? (GUST_LOAD * gustAmp * gustNoise(seed, 3, tick) * weight) / (CL_ALPHA * qs) : 0
+  const target = v3(
+    rollCmd * spec.rollRate - WINGS_LEVELING * sinBank * Math.max(cosBank, 0) * 2 + GUST_ROLL * gustAmp * gustNoise(seed, 1, tick),
+    pathRate.y - yawCmd * spec.yawRate - aero.kBeta * beta + GUST_YAW * gustAmp * gustNoise(seed, 2, tick),
+    pathRate.z + pitchCmd * pitchAuthority + aero.kAlpha * (alphaHold + gustAlpha - alpha),
+  )
+  const follow = Math.min(dt / spec.controlLag, 1)
+  const angVel = add(state.angVel, scale(sub(target, state.angVel), follow))
+
+  // ── Integrate (semi-implicit Euler) ──
+  const vel = add(state.vel, scale(accel, dt))
+  const pos = add(state.pos, scale(vel, dt))
+  const rate = length(angVel)
+  const orientation = rate > 1e-12 ? qNormalize(qMul(q, qFromAxisAngle(angVel, rate * dt))) : q
+
+  // ── Structure ──
+  const limit = gLoad >= 0 ? spec.limitGPos : spec.limitGNeg
+  const overG = Math.max(0, (gLoad / limit - G_STRESS_ONSET) / (1 - G_STRESS_ONSET))
+  const turbulenceStress =
+    turbulence > SEVERE_TURBULENCE
+      ? TURBULENCE_STRESS_RATE *
+        spec.gustSensitivity *
+        (V / TURBULENCE_REF_SPEED) *
+        (1 + (2 * (turbulence - SEVERE_TURBULENCE)) / (1 - SEVERE_TURBULENCE))
+      : 0
+  const overspeed = Math.max(0, Math.sqrt(qDyn / aero.maxSpeedQ) - 1) / OVERSPEED_MARGIN
+  const stress = Math.min(
+    1,
+    state.stress + (G_STRESS_RATE * overG * overG + turbulenceStress + OVERSPEED_STRESS_RATE * overspeed * overspeed) * dt,
+  )
+  const broken = stress >= 1 || gLoad / limit > INSTANT_FAILURE_FACTOR
+
+  const status: AircraftState['status'] = pos.y <= 0 ? 'crashed' : broken ? 'overstressed' : inGate(pos, route) ? 'arrived' : 'flying'
+
+  return {
+    t: state.t + dt,
+    pos,
+    vel,
+    orientation,
+    angVel,
+    airspeed: length(sub(vel, wind)),
+    throttle,
+    fuelKg,
+    gLoad,
+    cabinAccel: (gLoad - 1) * GRAVITY * spec.cabinDamping,
+    stress,
+    stalled: alpha > aero.alphaStall || alpha < aero.alphaStallNeg,
+    status,
+    trimAirspeed: trim,
+  } as TrimState
+}
+
+export const flightModel: FlightModel = { initialState, step }
+

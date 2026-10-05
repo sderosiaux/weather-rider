@@ -1,0 +1,14 @@
+
+> weather-rider@ lab /Users/sderosiaux/code/games/weather-rider-wt/flight
+> vitest run --config vitest.lab.config.ts
+
+
+ RUN  v5.0.2 /Users/sderosiaux/code/games/weather-rider-wt/flight
+
+
+ Test Files  20 passed | 1 skipped (21)
+      Tests  20 passed | 1 skipped (21)
+   Start at  22:20:58
+   Duration  130.97s (tests 100%)
+
+pnpm lab  1025.51s user 15.92s system 793% cpu 2:11.28 total

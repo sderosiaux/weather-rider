@@ -2,9 +2,10 @@
 // so updrafts, jets, downdrafts and shear act through angle of attack and airspeed, never by
 // special case. Rotation is rate-commanded: the nose follows the flight path, and a restoring term
 // pulls angle of attack toward a "hold" value: 1 g along the current path (bank-compensated), plus
-// a speed-stability term toward the airspeed the current thrust sustains in level flight. Short term,
-// neutral stick keeps going where you point; long term the aircraft settles level relative to the
-// air mass — so rising air carries it up, and with no thrust it glides at best-glide speed.
+// a speed hold. Hands off, the aircraft keeps its airspeed: surplus or missing energy — a power
+// change, rising or sinking air — goes into vertical speed, not speed. The held speed drifts slowly
+// (minutes) toward the airspeed the current thrust sustains in level flight, so idle ends up at
+// best glide and full power at top speed without the nose ever rising when you cut power.
 // A weathervane term kills sideslip.
 import { GRAVITY, SEVERE_TURBULENCE } from '../core/constants'
 import {
@@ -50,10 +51,34 @@ const SIDE_FORCE_PER_RAD = 0.8
 const MAX_BANK_COMPENSATION = 0.75
 /** Weak spiral stability (rad/s at 45° bank) so gusts don't random-walk the bank angle. */
 const WINGS_LEVELING = 0.12
-/** Speed stability: extra load factor per unit of relative airspeed error, and per g of tangential accel (damping). */
-const SPEED_STABILITY = 2
-const SPEED_DAMPING = 2
-const MAX_SPEED_CORRECTION = 0.4
+/**
+ * The held speed drifts toward the thrust-equilibrium airspeed with this time constant (s), but the drift
+ * may use at most SPEED_SHARE of the current excess (or missing) thrust: the rest goes into climb (or
+ * descent). A power cut therefore always descends, and speed follows power slowly.
+ */
+const SPEED_DRIFT_TIME = 30
+const SPEED_SHARE = 0.35
+/**
+ * Rising air lets an aircraft faster than its power sustains shed the excess sooner, into height: shedding
+ * may add this share of the vertical wind to the climb. The air lifts it anyway, so a power cut never reads
+ * as a climb; it is what lets a glider that cut power soar through a thermal hands off.
+ */
+const LIFT_SHEDDING = 0.35
+/**
+ * Speed-hold response, in load factor per g of unwanted tangential acceleration: gentle up to HOLD_KNEE,
+ * which is what a power change asks for (the nose eases over), firm beyond (a steep path after a manoeuvre).
+ */
+const HOLD_GAIN = 2.5
+const HOLD_KNEE = 0.15
+const HOLD_FIRM_GAIN = 1.5
+const HOLD_MAX = 0.4
+/**
+ * Envelope protection: below ENVELOPE_LOW × the (bank-adjusted) stall speed, or above the fastest level
+ * flight at full power, the hold brings the airspeed back inside within ENVELOPE_TIME (s), trading height for
+ * it. A power change never leaves the envelope, so it never triggers this.
+ */
+const ENVELOPE_LOW = 1.2
+const ENVELOPE_TIME = 5
 /**
  * Peak gust amplitudes at turbulence 1 and gustSensitivity 1. Pitch gusts are expressed as load
  * factor (then converted to an angle-of-attack kick for the current q), otherwise a fast, highly
@@ -109,6 +134,10 @@ export function headingOf(orientation: AircraftState['orientation']): number {
 }
 
 /** Trimmed for cruise airspeed along startHeading; the ground velocity includes the wind at the start. */
+export type TrimState = AircraftState & { readonly trimAirspeed: number }
+export const TP = { RESTORE: 1 }
+Object.assign(TP, JSON.parse(process.env.TRIMP ?? "{}"))
+
 export function initialState(spec: AircraftSpec, route: Route, weather: WeatherField): AircraftState {
   const w = weather.sample(route.start, 0, scratch).wind
   const wind = v3(w.x, w.y, w.z)
@@ -132,7 +161,20 @@ export function initialState(spec: AircraftSpec, route: Route, weather: WeatherF
     stress: 0,
     stalled: false,
     status: 'flying',
-  }
+    trimAirspeed: spec.cruiseSpeedMs,
+  } as TrimState
+}
+
+/** Drag in straight, level, 1 g flight at this dynamic pressure × wing area. */
+function levelDrag(aero: ReturnType<typeof aeroOf>, qs: number, weight: number): number {
+  const cl = weight / qs
+  return qs * (aero.cd0 + aero.k * cl * cl)
+}
+
+/** Load factor the speed hold adds against `err` g of unwanted tangential acceleration. */
+function holdResponse(err: number): number {
+  const x = Math.abs(err)
+  return Math.sign(err) * Math.min(Math.min(HOLD_GAIN * x, HOLD_KNEE) + HOLD_FIRM_GAIN * Math.max(0, x - HOLD_KNEE), HOLD_MAX)
 }
 
 function inGate(pos: Vec3, route: Route): boolean {
@@ -204,12 +246,27 @@ export function step(
   const pitchCmd = clamp(controls.pitch, -1, 1)
   const rollCmd = clamp(controls.roll, -1, 1)
   const yawCmd = clamp(controls.yaw, -1, 1)
-  // Speed stability yields to the pilot: a held stick means "I want this path", not "fight me".
+  // The speed hold yields to the pilot: a held stick means "I want this path", not "fight me".
   const vRef = equilibriumAirspeed(spec, state.pos.y, thrust, mass)
   const tangentialG = V > MIN_AERO_SPEED ? dot(accel, airVel) / (V * GRAVITY) : 0
-  const speedCorrection =
-    clamp((SPEED_STABILITY * (V - vRef)) / vRef + SPEED_DAMPING * tangentialG, -MAX_SPEED_CORRECTION, MAX_SPEED_CORRECTION) *
-    (1 - Math.abs(pitchCmd))
+  const excessAccel = qs > 1 ? (thrust - levelDrag(aero, qs, weight)) / mass : 0
+  const liftShedAccel = V > MIN_AERO_SPEED ? (LIFT_SHEDDING * GRAVITY * Math.max(0, wind.y)) / V : 0
+  // Slowing draws only on missing thrust (and rising air); speeding up on the thrust surplus, or on the
+  // deficit behind the drag curve, where diving is the only way back to speed.
+  const vLow = ENVELOPE_LOW * Math.sqrt((2 * weight) / (rho * spec.wingAreaM2 * aero.clMax * Math.max(cosBank, 0.5)))
+  const vHigh = equilibriumAirspeed(spec, state.pos.y, spec.maxThrustN * thrustLapse(state.pos.y), mass)
+  const trim0 = (state as TrimState).trimAirspeed ?? V
+  const qsTrim = 0.5 * rho * trim0 * trim0 * spec.wingAreaM2
+  const trimExcess = qsTrim > 1 ? (thrust - levelDrag(aero, qsTrim, weight)) / mass : 0
+  const liftShedTrim = (LIFT_SHEDDING * GRAVITY * Math.max(0, wind.y)) / Math.max(trim0, MIN_AERO_SPEED)
+  const trimRate = clamp((vRef - trim0) / SPEED_DRIFT_TIME, -SPEED_SHARE * Math.max(0, -trimExcess) - liftShedTrim, SPEED_SHARE * Math.abs(trimExcess))
+  const trim = clamp(trim0 + trimRate * dt, vLow, vHigh)
+  void excessAccel
+  void liftShedAccel
+  let holdAccel = trimRate + (TP.RESTORE * GRAVITY * (trim - V)) / Math.max(trim, MIN_AERO_SPEED)
+  if (V < vLow) holdAccel = Math.max(holdAccel, (vLow - V) / ENVELOPE_TIME)
+  else if (V > vHigh) holdAccel = Math.min(holdAccel, (vHigh - V) / ENVELOPE_TIME)
+  const speedCorrection = holdResponse(tangentialG - holdAccel / GRAVITY) * (1 - Math.abs(pitchCmd))
   const nHold = Math.cos(gamma) * (cosBank + compensation) + speedCorrection
   const alphaHold =
     qs > 1
@@ -268,7 +325,8 @@ export function step(
     stress,
     stalled: alpha > aero.alphaStall || alpha < aero.alphaStallNeg,
     status,
-  }
+    trimAirspeed: trim,
+  } as TrimState
 }
 
 export const flightModel: FlightModel = { initialState, step }
