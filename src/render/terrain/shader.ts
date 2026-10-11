@@ -45,9 +45,11 @@ function heightGlsl(levels: number): string {
 /** Full ground sample (fragment shader): height, gradient and cover weights, level picked by footprint too. */
 function groundGlsl(levels: number): string {
   const add = Array.from({ length: levels }, (_, i) => /* glsl */ `
-    void addLevel${i}(vec2 p, vec2 pc, float w, inout Ground g) {
+    void addLevel${i}(vec2 p, vec2 warp, float w, inout Ground g) {
       vec2 uv = p * uLev[${i}].x;
       float d = uLev[${i}].w;
+      // Cover borders pushed around by more than a texel, or coarse levels show their grid as blocks.
+      vec2 pc = p + warp * max(uLev[${i}].y * 2.2, 160.0);
       vec4 a0 = textureLod(uT0_${i}, uv, 0.0);
       vec4 a = textureLod(uT0_${i}, pc * uLev[${i}].x, 0.0);
       vec4 b = textureLod(uT1_${i}, pc * uLev[${i}].x, 0.0);
@@ -60,13 +62,14 @@ function groundGlsl(levels: number): string {
       // Water stays where the terrain put it (banks and coasts are smooth); land covers take the warp.
       g.c0 += w * vec3(a0.g, a.ba);
       g.c1 += w * b;
+      g.texel += w * uLev[${i}].y;
     }`).join('\n')
   const steps = Array.from({ length: levels }, (_, i) => {
     // The coarsest level is never refused for being too fine.
     const footprint = i === levels - 1 ? '1.0' : `(1.0 - smoothstep(uLev[${i}].y, uLev[${i}].y * 2.5, fp))`
     return /* glsl */ `
     w = levelWeight(p, ${i}) * ${footprint} * rem;
-    if (w > 0.001) { addLevel${i}(p, pc, w, g); rem -= w; }`
+    if (w > 0.001) { addLevel${i}(p, warp, w, g); rem -= w; }`
   }).join('')
   return /* glsl */ `
     struct Ground {
@@ -74,15 +77,17 @@ function groundGlsl(levels: number): string {
       vec2 grad;
       vec3 c0; // water, beach, city
       vec4 c1; // fields, forest, rock, snow
+      float texel; // weighted texel size (m) of the levels sampled
     };
     ${add}
-    // pc: where cover is read — p pushed around by noise so class borders never show the texel grid.
-    Ground groundAt(vec2 p, vec2 pc, float fp) {
-      Ground g = Ground(0.0, vec2(0.0), vec3(0.0), vec4(0.0));
+    // warp: unit-ish noise vector; cover is read at p + warp × (a couple of texels of each level).
+    Ground groundAt(vec2 p, vec2 warp, float fp) {
+      Ground g = Ground(0.0, vec2(0.0), vec3(0.0), vec4(0.0), 0.0);
       float rem = 1.0, w;
       ${steps}
       g.h += rem * ${SEA_FLOOR.toFixed(1)};
       g.c0.x += rem;
+      g.texel += rem * 2000.0;
       return g;
     }
   `
@@ -136,7 +141,8 @@ export function terrainFragmentShader(levels: number): string {
         t += stride;
         stride *= 1.65;
         float over = groundHeight(pos.xz + l * t) - (pos.y + t * slope);
-        occ = max(occ, smoothstep(0.0, 25.0 + t * 0.02, over));
+        // Bias grows with distance: coarse texels must not shadow themselves (blocky acne).
+        occ = max(occ, smoothstep(15.0 + t * 0.01, 60.0 + t * 0.04, over));
       }
       return occ;
     }
@@ -148,7 +154,7 @@ export function terrainFragmentShader(levels: number): string {
     uniform vec4 uCities[${MAX_CITIES}];
     uniform int uCityCount;
     varying vec3 vWorld;
-    const float GROUND_HAZE = 0.7;
+    const float GROUND_HAZE = 0.5;
 
     uint pcg(uint v) {
       uint s = v * 747796405u + 2891336453u;
@@ -225,7 +231,7 @@ export function terrainFragmentShader(levels: number): string {
       vec2 lot = floor(f * lotN);
       float hl = hash(id * 7.0 + lot + 17.0);
       vec3 roof;
-      if (industry) roof = hl < 0.6 ? vec3(0.44, 0.43, 0.41) : vec3(0.17, 0.17, 0.18);
+      if (industry) roof = hl < 0.6 ? vec3(0.33, 0.32, 0.31) : vec3(0.17, 0.17, 0.18);
       else if (kind > 0.5) roof = hl < 0.5 ? vec3(0.31, 0.29, 0.27) : hl < 0.85 ? vec3(0.40, 0.37, 0.32) : vec3(0.13, 0.13, 0.14);
       else if (hl < 0.55) roof = mix(vec3(0.36, 0.15, 0.08), vec3(0.24, 0.23, 0.23), downtown);
       else if (hl < 0.8) roof = vec3(0.30, 0.27, 0.24);
@@ -268,8 +274,8 @@ export function terrainFragmentShader(levels: number): string {
       vec4 nWave1 = texture(uNoise, p / 1400.0 + vec2(uTime * 0.004, uTime * 0.002));
       vec4 nWave2 = texture(uNoise, p / 380.0 + vec2(-uTime * 0.006, uTime * 0.005));
 
-      vec2 warp = (nMid.gb - 0.5) * 220.0 + (nFine.gb - 0.5) * 70.0;
-      Ground g = groundAt(p, p + warp, fp);
+      vec2 warp = (nMacro.gb - 0.5) * 0.8 + (nMid.gb - 0.5) * 1.2 + (nFine.gb - 0.5) * 0.15;
+      Ground g = groundAt(p, warp, fp);
       float wWater = g.c0.x, wBeach = g.c0.y, wCity = g.c0.z;
       float wFields = g.c1.x, wForest = g.c1.y, wRock = g.c1.z, wSnow = g.c1.w;
       float wGrass = max(0.0, 1.0 - wWater - wBeach - wCity - wFields - wForest - wRock - wSnow);
@@ -281,13 +287,16 @@ export function terrainFragmentShader(levels: number): string {
       wGrass *= 1.0 - steep; wForest *= 1.0 - steep; wFields *= 1.0 - steep; wSnow *= 1.0 - 0.7 * steep;
 
       // Organic borders between land covers: noise pushes weights, then a soft max keeps one per pixel.
-      float a = nMid.r - 0.5, b = nFine.a - 0.5;
-      wForest += (a * 0.5 + b * 0.3) * step(0.001, wForest);
-      wFields += (-a * 0.3 + b * 0.25) * step(0.001, wFields);
-      wGrass += (b * -0.3 + a * 0.2) * step(0.001, wGrass);
-      wRock += (a * 0.35 - b * 0.2) * step(0.001, wRock);
-      wSnow += (b * 0.4 - a * 0.2) * step(0.001, wSnow);
-      float band = 0.2 + 0.9 * smoothstep(40.0, 500.0, fp);
+      float a = nMid.r - 0.5, b = (nFine.a - 0.5) * 0.5;
+      wForest += (a * 0.5 + b * 0.3) * smoothstep(0.0, 0.3, wForest);
+      wFields += (-a * 0.3 + b * 0.25) * smoothstep(0.0, 0.3, wFields);
+      wGrass += (b * -0.3 + a * 0.2) * smoothstep(0.0, 0.3, wGrass);
+      wRock += (a * 0.35 - b * 0.2) * smoothstep(0.0, 0.3, wRock);
+      wSnow += (b * 0.4 - a * 0.2) * smoothstep(0.0, 0.3, wSnow);
+      float band = 0.28 + 0.9 * smoothstep(40.0, 500.0, fp);
+      // Sharpen borders only where a texel spans several pixels; below that, plain bilinear blending is
+      // already about a pixel wide and sharpening would only alias.
+      band = mix(1.0, band, smoothstep(2.0, 6.0, g.texel / fp));
       float top = max(max(max(wWater, wBeach), max(wCity, wFields)), max(max(wForest, wRock), max(wSnow, wGrass)));
       float cut = top - band;
       wWater = max(wWater - cut, 0.0); wBeach = max(wBeach - cut, 0.0); wCity = max(wCity - cut, 0.0);
@@ -310,7 +319,10 @@ export function terrainFragmentShader(levels: number): string {
       if (wForest > 0.0) {
         // Clumps and clearings read from kilometres away; crowns only up close.
         float clumps = smoothstep(0.25, 0.75, nFine.r * 0.6 + nMid.a * 0.4);
-        vec3 forest = mix(vec3(0.035, 0.075, 0.03), vec3(0.075, 0.11, 0.04), nMacro.a) * (0.55 + 0.6 * clumps) * (0.65 + 0.7 * nCanopy.r);
+        // Stands of different trees over kilometres: blue-green conifers, yellow-green broadleaf, olive scrub.
+        vec3 stand = mix(vec3(0.03, 0.07, 0.045), vec3(0.085, 0.12, 0.035), smoothstep(0.3, 0.7, nMacro.a));
+        stand = mix(stand, vec3(0.11, 0.11, 0.05), smoothstep(0.62, 0.8, nRegion.r) * 0.6);
+        vec3 forest = stand * (0.6 + 0.6 * clumps) * (0.65 + 0.7 * nCanopy.r);
         albedo += wForest * forest;
         micro += wForest;
       }

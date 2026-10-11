@@ -62,7 +62,8 @@ export function layoutBuildings(terrain: Terrain, city: TerrainCity, angle: numb
           const h1 = cellHash(bx * 7 + i + 17, by * 7 + j + 17)
           const h2 = cellHash(bx * 13 + i * 3 + 5, by * 11 + j * 5 + 9)
           const dt = downtownAt(Math.hypot(qx, qz) / city.radius)
-          const height = dt > 0.5 ? 28 + 170 * dt * dt * h2 * h2 : 8 + 26 * dt * h2
+          // Continuous in the falloff: the skyline slopes down to the suburbs instead of ending in a wall.
+          const height = 7 + (12 + 190 * dt ** 3 * (0.25 + 0.75 * h2 * h2)) * smoothstep(0.1, 0.6, dt) * (0.6 + 0.4 * h1)
           const fw = dt > 0.5 ? 0.55 + 0.2 * h1 : 0.5 + 0.15 * h1
           out.push(x, terrain.heightAt(x, z), z, angle, lw * fw, ld * (fw + 0.05), height, h1)
         }
