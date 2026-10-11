@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { WORLD_CEILING_M } from '../core/constants'
-import { dailyNumber, dailyWeather, dailyWeatherFor, realBlockTimeS, routeBounds, weatherParamsFor } from './daily'
+import { dailyNumber, dailyWeather, dailyWeatherFor, realBlockTimeS, routeBounds, terrainParamsFor, weatherParamsFor } from './daily'
 import { ROUTE_CATALOG } from './routes'
 
 describe('dailyNumber', () => {
@@ -140,6 +140,55 @@ describe('weatherParamsFor', () => {
       expect(p.boundsMax.x).toBe(r.gate.x + 30_000)
       expect(p.boundsMin.z).toBe(Math.min(0, r.gate.z) - 30_000)
       expect(p.boundsMax.z).toBe(Math.max(0, r.gate.z) + 30_000)
+    }
+  })
+})
+
+describe('terrainParamsFor', () => {
+  const d = dailyWeatherFor(272)
+
+  it('is deterministic: same day and route → same params, even from a fresh dailyWeatherFor', () => {
+    for (const [i, r] of d.routes.entries()) {
+      expect(terrainParamsFor(d, r)).toEqual(terrainParamsFor(dailyWeatherFor(272), dailyWeatherFor(272).routes[i]!))
+    }
+  })
+
+  it('derives a distinct seed per route, off the weather seed stream', () => {
+    const terrain = d.routes.map((r) => terrainParamsFor(d, r).seed)
+    const weather = d.routes.map((r) => weatherParamsFor(d, r).seed)
+    expect(new Set(terrain).size).toBe(3)
+    for (const s of terrain) expect(weather).not.toContain(s)
+  })
+
+  it('gives the same city pair a different seed on different days', () => {
+    // Collect every (day, route id) over a year; a city pair seen on several days must get several terrains.
+    const seedsById = new Map<string, Set<number>>()
+    let draws = 0
+    for (let n = 1; n <= 365; n++) {
+      const day = dailyWeatherFor(n)
+      for (const r of day.routes) {
+        const set = seedsById.get(r.id) ?? new Set<number>()
+        set.add(terrainParamsFor(day, r).seed)
+        seedsById.set(r.id, set)
+        draws++
+      }
+    }
+    const distinct = [...seedsById.values()].reduce((sum, s) => sum + s.size, 0)
+    expect(distinct).toBe(draws)
+  })
+
+  it('maps the route onto the terrain contract and shares the weather bounds', () => {
+    for (const r of d.routes) {
+      const t = terrainParamsFor(d, r)
+      const w = weatherParamsFor(d, r)
+      expect(t.boundsMin).toEqual(w.boundsMin)
+      expect(t.boundsMax).toEqual(w.boundsMax)
+      expect(t.start).toEqual(r.start)
+      expect(t.gate).toEqual(r.gate)
+      expect(t.departureName).toBe(r.from)
+      expect(t.arrivalName).toBe(r.to)
+      expect(t.startAlt).toBe(r.start.y)
+      expect(t.gateMinAlt).toBe(r.gateMinAlt)
     }
   })
 })

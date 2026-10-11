@@ -1,11 +1,13 @@
 import { DAILY_EPOCH_UTC_MS, WORLD_CEILING_M } from '../core/constants'
 import { clamp, lerp, v3 } from '../core/math'
 import { createRng, hashInts, hashString } from '../core/rng'
-import type { DailyWeather, Route, Vec3, WeatherParams } from '../core/types'
+import type { DailyWeather, Route, TerrainParams, Vec3, WeatherParams } from '../core/types'
 import { ROUTE_CATALOG, type CatalogRoute } from './routes'
 
 const DAY_MS = 86_400_000
 const DAILY_SALT = 0x5eed_da17
+/** Keeps the terrain seed off the weather seed stream: a terrain change can never shift the sky. */
+const TERRAIN_SALT = 0x7e44_a1f0
 
 /** Days since 2026-01-01 UTC, plus one. Uses the absolute instant only, so the local timezone never matters. */
 export function dailyNumber(now: Date): number {
@@ -123,5 +125,18 @@ export function weatherParamsFor(daily: DailyWeather, route: Route): WeatherPara
     ...routeBounds(route),
     severity: route.severity,
     corridor: [route.start, route.gate],
+  }
+}
+
+export function terrainParamsFor(daily: DailyWeather, route: Route): TerrainParams {
+  return {
+    seed: hashInts(daily.seed, hashString(route.id), TERRAIN_SALT),
+    ...routeBounds(route),
+    start: route.start,
+    gate: route.gate,
+    departureName: route.from,
+    arrivalName: route.to,
+    startAlt: route.start.y,
+    gateMinAlt: route.gateMinAlt,
   }
 }

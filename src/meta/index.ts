@@ -1,4 +1,4 @@
-export { dailyNumber, dailyWeather, dailyWeatherFor, realBlockTimeS, routeBounds, weatherParamsFor } from './daily'
+export { dailyNumber, dailyWeather, dailyWeatherFor, realBlockTimeS, routeBounds, terrainParamsFor, weatherParamsFor } from './daily'
 export { ROUTE_CATALOG, type CatalogRoute } from './routes'
 export { applyLoadout, findUpgrade, GOOD_DIRECTION, UPGRADE_SLOTS, UPGRADES } from './upgrades'
 export {
