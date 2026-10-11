@@ -6,6 +6,8 @@ A browser flight game about reading the sky. Catch rising air along a storm, rid
 
 Built with TypeScript and Three.js. The game runs entirely in your browser, with progress saved locally.
 
+**Play it: https://sderosiaux.github.io/weather-rider/**
+
 ## Screenshots
 
 | Pick a daily route | Follow the air currents |

@@ -23,5 +23,7 @@ const productionCsp = (): Plugin => ({
 })
 
 export default defineConfig({
+  // Relative asset URLs: the same build works at the domain root and under GitHub Pages' /weather-rider/.
+  base: './',
   plugins: [productionCsp()],
 })
