@@ -130,7 +130,6 @@ export const createTerrain: CreateTerrain = (params: TerrainParams): Terrain => 
     clearance,
     minCap,
     noises,
-    seed,
   })
 
   const placed = placeCities({
