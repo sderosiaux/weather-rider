@@ -126,6 +126,20 @@ export function terrainFragmentShader(levels: number): string {
     ${ATMOSPHERE_GLSL}
     ${levelGlsl(levels)}
     ${groundGlsl(levels)}
+    ${heightGlsl(levels)}
+    // Low sun, long shadows: march toward the sun over the height maps (steps growing to ~12 km).
+    float terrainShadow(vec3 pos) {
+      vec2 l = normalize(uSunDir.xz);
+      float slope = uSunDir.y / length(uSunDir.xz);
+      float t = 0.0, stride = 45.0, occ = 0.0;
+      for (int k = 0; k < 10; k++) {
+        t += stride;
+        stride *= 1.65;
+        float over = groundHeight(pos.xz + l * t) - (pos.y + t * slope);
+        occ = max(occ, smoothstep(0.0, 25.0 + t * 0.02, over));
+      }
+      return occ;
+    }
     uniform sampler2D uNoise;
     uniform vec3 uDeep;
     uniform vec4 uShadows[${MAX_GROUND_SHADOWS}];
@@ -330,6 +344,9 @@ export function terrainFragmentShader(levels: number): string {
         float d = length(p - c.xy) / c.z;
         shadow = max(shadow, c.w * (1.0 - smoothstep(0.35, 1.0, d)));
       }
+      // Cast shadows only where they can still be seen through the haze.
+      float castShadow = dist < 90000.0 ? terrainShadow(vec3(p.x, max(g.h, 0.0), p.y)) * (1.0 - smoothstep(60000.0, 90000.0, dist)) : 0.0;
+      shadow = max(shadow, castShadow * 0.9);
       float sunLit = smoothstep(-0.2, 0.7, dot(ln, uSunDir)) * (1.0 - 0.85 * shadow);
       vec3 ambient = mix(vec3(0.10, 0.12, 0.21), vec3(0.34, 0.41, 0.62), 0.5 + 0.5 * ln.y);
       vec3 land = albedo * inv * (ambient + uSunColor * sunLit * 0.75);
