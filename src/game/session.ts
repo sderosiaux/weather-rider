@@ -12,6 +12,7 @@ import type {
   MutableWeatherSample,
   Route,
   Vec3,
+  Terrain,
   WeatherField,
   WeatherSample,
 } from '../core/types'
@@ -28,6 +29,7 @@ export interface FlightSetup {
   readonly route: Route
   readonly spec: AircraftSpec
   readonly weather: WeatherField
+  readonly terrain: Terrain
   readonly pilot: string
   /** First ghost is the race reference for the HUD delta. */
   readonly ghosts: readonly Ghost[]
@@ -62,13 +64,14 @@ export function createFlightSession(setup: FlightSetup): FlightSession {
   const pace: GhostPace | null = setup.ghosts[0] ? createGhostPace(setup.ghosts[0], route) : null
   const sample: MutableWeatherSample = { wind: { x: 0, y: 0, z: 0 }, turbulence: 0, dominant: null, cloud: 0 }
 
-  let state = flightModel.initialState(spec, route, weather)
+  const env = { weather, route, terrain: setup.terrain }
+  let state = flightModel.initialState(spec, env)
   let acc = 0
   let outcome: FlightOutcome | null = null
   recorder.push(state)
 
   const stepOnce = (controls: Controls): void => {
-    state = flightModel.step(spec, state, controls, weather, route, SIM_DT)
+    state = flightModel.step(spec, state, controls, env, SIM_DT)
     const w = weather.sample(state.pos, state.t, sample)
     tracker.push({ state, controls, weather: { wind: { ...w.wind }, turbulence: w.turbulence, dominant: w.dominant, cloud: w.cloud }, dt: SIM_DT })
     recorder.push(state)

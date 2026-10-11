@@ -6,7 +6,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createAutopilot, runFlight } from '../src/bot'
 import type { AircraftSpec } from '../src/core/types'
 import { AIRCRAFT } from '../src/flight'
-import { applyLoadout, dailyWeatherFor, UPGRADES, weatherParamsFor } from '../src/meta'
+import { applyLoadout, dailyWeatherFor, UPGRADES, terrainParamsFor, weatherParamsFor } from '../src/meta'
+import { createTerrain } from '../src/terrain'
 import { createWeather } from '../src/weather'
 import { PILOTS } from './matrix'
 import { CACHE, FIRST_DAY } from './shard'
@@ -34,10 +35,11 @@ function evaluate(spec: AircraftSpec): Record<BoardName, number> {
     const daily = dailyWeatherFor(FIRST_DAY + i)
     for (const route of daily.routes) {
       const weather = createWeather(weatherParamsFor(daily, route))
+      const terrain = createTerrain(terrainParamsFor(daily, route))
       n++
       for (const b of BOARDS) {
         const p = PILOTS.find((x) => x.name === SPECIALIST[b])!
-        out[b] += runFlight(spec, route, weather, createAutopilot(p.strategy, spec, route, weather, p.opts)).score[b]
+        out[b] += runFlight(spec, { route, weather, terrain }, createAutopilot(p.strategy, spec, route, weather, p.opts)).score[b]
       }
     }
   }

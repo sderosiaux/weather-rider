@@ -2,8 +2,9 @@
 import { createAutopilot, runFlight, type AutopilotOptions, type FlightOutcome, type Strategy } from '../src/bot'
 import type { Ghost, Route } from '../src/core/types'
 import { AIRCRAFT } from '../src/flight'
-import { dailyWeatherFor, weatherParamsFor } from '../src/meta'
+import { dailyWeatherFor, terrainParamsFor, weatherParamsFor } from '../src/meta'
 import { scoreReference } from '../src/scoring'
+import { createTerrain } from '../src/terrain'
 import { createWeather } from '../src/weather'
 
 /** A pilot = a strategy plus optional soaring knobs. The first four are the brief's strategies. */
@@ -108,6 +109,7 @@ export function runMatrix(
     daily.routes.forEach((route: Route, i) => {
       if (!unit(di, i)) return
       const weather = createWeather(weatherParamsFor(daily, route))
+      const terrain = createTerrain(terrainParamsFor(daily, route))
       for (const spec of AIRCRAFT) {
         const ref = scoreReference(spec, route)
         for (const p of pilots) {
@@ -130,7 +132,7 @@ export function runMatrix(
               orbitStart = -1
             }
           }
-          const r = runFlight(spec, route, weather, createAutopilot(p.strategy, spec, route, weather, { ...p.opts, trace }), {
+          const r = runFlight(spec, { route, weather, terrain }, createAutopilot(p.strategy, spec, route, weather, { ...p.opts, trace }), {
             dailyNumber: day,
             pilotName: `${p.name}-bot`,
           })

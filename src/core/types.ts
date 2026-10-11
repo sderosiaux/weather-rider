@@ -148,12 +148,83 @@ export interface AircraftState {
   readonly status: 'flying' | 'arrived' | 'crashed' | 'overstressed'
 }
 
+/** Everything outside the aircraft that the flight model reads. */
+export interface FlightEnv {
+  readonly weather: WeatherField
+  readonly route: Route
+  readonly terrain: Terrain
+}
+
 export interface FlightModel {
   /** Starts trimmed at route.start with airspeed = cruise in the local wind (ground vel = air vel + wind). */
-  initialState(spec: AircraftSpec, route: Route, weather: WeatherField): AircraftState
-  /** Pure: same inputs → same output. dt is always SIM_DT. */
-  step(spec: AircraftSpec, state: AircraftState, controls: Controls, weather: WeatherField, route: Route, dt: number): AircraftState
+  initialState(spec: AircraftSpec, env: FlightEnv): AircraftState
+  /**
+   * Pure: same inputs → same output. dt is always SIM_DT.
+   * `crashed` when the aircraft reaches the ground: y ≤ max(terrain.heightAt(x, z), 0) (water surface is 0).
+   */
+  step(spec: AircraftSpec, state: AircraftState, controls: Controls, env: FlightEnv, dt: number): AircraftState
 }
+
+// ─── Terrain ────────────────────────────────────────────────────────────────
+
+/** What covers the ground. Water = sea | lake | river (surface at the local ground height, sea at 0). */
+export type TerrainCover = 'sea' | 'beach' | 'grass' | 'fields' | 'forest' | 'rock' | 'snow' | 'lake' | 'river' | 'city'
+
+export interface TerrainCity {
+  readonly id: string
+  readonly name: string
+  /** Ground-level centre (y = ground height there). */
+  readonly center: Vec3
+  readonly radius: number
+  /** departure under/behind route.start, arrival under route.gate, towns along the way. */
+  readonly role: 'departure' | 'arrival' | 'town'
+}
+
+export interface TerrainRiver {
+  readonly id: string
+  /** Ground-level polyline, flowing from first to last point (downhill). */
+  readonly path: readonly Vec3[]
+  readonly width: number
+}
+
+/**
+ * The land under the route: what the player watches go by (sense of speed, variety) and, later, what the
+ * weather grows from (thermals over sunny land and towns, lift on windward slopes, sink in their lee).
+ * Deterministic in its params. Defined everywhere: beyond the playable bounds it keeps going (or fades to sea)
+ * so the horizon is never empty.
+ */
+export interface Terrain {
+  readonly seed: number
+  readonly boundsMin: Vec3
+  readonly boundsMax: Vec3
+  /**
+   * Ground elevation (m) at (x, z); negative under the sea (surface 0). Pure, allocation-free and cheap: called
+   * every sim step by the flight model and hundreds of thousands of times to bake render textures.
+   */
+  heightAt(x: number, z: number): number
+  coverAt(x: number, z: number): TerrainCover
+  readonly cities: readonly TerrainCity[]
+  readonly rivers: readonly TerrainRiver[]
+  /** Highest ground anywhere in the bounds (m). */
+  readonly maxHeight: number
+}
+
+export interface TerrainParams {
+  readonly seed: number
+  /** Playable area (same as the route's weather bounds). */
+  readonly boundsMin: Vec3
+  readonly boundsMax: Vec3
+  readonly start: Vec3
+  readonly gate: Vec3
+  /** Names for the departure / arrival cities (route.from / route.to). */
+  readonly departureName: string
+  readonly arrivalName: string
+  /** Ground must stay below these near the start (start altitude) and under the gate (its window floor). */
+  readonly startAlt: number
+  readonly gateMinAlt: number
+}
+
+export type CreateTerrain = (params: TerrainParams) => Terrain
 
 // ─── Routes, daily weather ──────────────────────────────────────────────────
 

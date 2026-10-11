@@ -10,6 +10,7 @@ import type {
   HudModel,
   PlayerProgress,
   Route,
+  Terrain,
   Upgrade,
   UpgradeSlot,
   WeatherField,
@@ -41,6 +42,8 @@ export interface WorldView {
   readonly camera: THREE.PerspectiveCamera
   readonly renderer: THREE.WebGLRenderer
   setWeather(weather: WeatherField): void
+  /** The land under the route (replaces the endless sea; sea remains where the ground is below 0). */
+  setTerrain(terrain: Terrain): void
   setRoute(route: Route): void
   setAircraft(spec: AircraftSpec, liveryColor: string): void
   setGhosts(ghosts: readonly GhostVisual[]): void

@@ -2,8 +2,9 @@
 //   AC=regional ST=surfer DAY=272 R=1 EVERY=20 [PROFILE='{"cruise":"jet"}'] [GX=0.2] pnpm lab lab/trace.lab.ts --silent=false
 import { it } from 'vitest'
 import { aircraftById } from '../src/flight'
+import { createTerrain } from '../src/terrain'
 import { createWeather } from '../src/weather'
-import { dailyWeatherFor, weatherParamsFor } from '../src/meta'
+import { dailyWeatherFor, terrainParamsFor, weatherParamsFor } from '../src/meta'
 import { createAutopilot, runFlight, type Strategy } from '../src/bot'
 
 it.skipIf(!process.env.AC)('trace', () => {
@@ -11,12 +12,13 @@ it.skipIf(!process.env.AC)('trace', () => {
   const route = daily.routes[Number(process.env.R ?? 0)]!
   const spec = aircraftById(process.env.AC ?? 'regional')
   const weather = createWeather(weatherParamsFor(daily, route))
+      const terrain = createTerrain(terrainParamsFor(daily, route))
   const st = (process.env.ST ?? 'surfer') as Strategy
   const pilot = createAutopilot(st, spec, route, weather, { profile: JSON.parse(process.env.PROFILE ?? '{}'), trace: (t, e) => console.log(`  [${t.toFixed(0)}] ${e}`) })
   let n = 0
   const every = Number(process.env.EVERY ?? 20) * 60
   const w = { wind: { x: 0, y: 0, z: 0 }, turbulence: 0, dominant: null, cloud: 0 }
-  const r = runFlight(spec, route, weather, (s) => {
+  const r = runFlight(spec, { route, weather, terrain }, (s) => {
     const c = pilot(s)
     if (n++ % every === 0 || (process.env.GX && Math.abs(s.gLoad - 1) > Number(process.env.GX) && n % 30 === 0)) {
       weather.sample(s.pos, s.t, w)

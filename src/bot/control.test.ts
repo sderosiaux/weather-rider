@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { SIM_DT } from '../core/constants'
-import { createFixtureWeather, fixtureRoute } from '../core/fixtures'
+import { createFixtureWeather, createFlatTerrain, fixtureRoute } from '../core/fixtures'
 import { v3 } from '../core/math'
 import type { AircraftState, WeatherField } from '../core/types'
 import { AIRCRAFT, aircraftById, flightModel } from '../flight'
 import { uniformWeather } from '../flight/testkit'
 import { bankAngle, bankForTrack, HUMAN_HANDS, horizontalDistance, orbitBank, orbitTrack, trackOf, wrapAngle } from './control'
 import { createInnerLoop, type Intent } from './pilot'
+
+const terrain = createFlatTerrain()
 
 const DEG = Math.PI / 180
 const still = uniformWeather()
@@ -24,10 +26,10 @@ function hold(
 ): AircraftState {
   const spec = aircraftById(specId)
   const inner = createInnerLoop(spec, weather, HUMAN_HANDS)
-  const s0 = flightModel.initialState(spec, route, weather)
+  const s0 = flightModel.initialState(spec, { route, weather, terrain })
   let s = start ? start(s0) : s0
   for (let i = 0; i < seconds / SIM_DT && s.status === 'flying'; i++) {
-    s = flightModel.step(spec, s, inner(s, intentOf(s)), weather, route, SIM_DT)
+    s = flightModel.step(spec, s, inner(s, intentOf(s)), { route, weather, terrain }, SIM_DT)
     onStep?.(s)
   }
   return s
@@ -107,10 +109,10 @@ describe('altitude hold (still air)', () => {
       worst = Math.max(worst, 3000 - s.pos.y)
     })
     const spec = aircraftById('narrowbody')
-    let s = at(flightModel.initialState(spec, route, weather))
+    let s = at(flightModel.initialState(spec, { route, weather, terrain }))
     let neutralWorst = 0
     for (let i = 0; i < 90 / SIM_DT; i++) {
-      s = flightModel.step(spec, s, { pitch: 0, roll: 0, yaw: 0, throttle: s.throttle }, weather, route, SIM_DT)
+      s = flightModel.step(spec, s, { pitch: 0, roll: 0, yaw: 0, throttle: s.throttle }, { route, weather, terrain }, SIM_DT)
       neutralWorst = Math.max(neutralWorst, 3000 - s.pos.y)
     }
     expect(neutralWorst).toBeGreaterThan(150)

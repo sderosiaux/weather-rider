@@ -15,6 +15,7 @@ import {
   setLivery,
   unequipSlot,
   unlockHints,
+  terrainParamsFor,
   weatherParamsFor,
 } from '../meta'
 import { createAudio } from '../audio'
@@ -23,6 +24,7 @@ import { DEFAULT_SETTINGS, type Settings, type UnlockedItem } from '../core/pres
 import { createWorldView } from '../render'
 import { ghostCodec } from '../scoring'
 import { createHud, createInput, createScreens } from '../ui'
+import { createTerrain } from '../terrain'
 import { createWeather } from '../weather'
 import { admitGhost, type RaceGhost } from './ghostGate'
 import { safeStorage } from './safeStorage'
@@ -131,12 +133,14 @@ export function startApp(root: HTMLElement): void {
     const route = today.routes[2]
     const spec = specFor(progress.unlockedAircraft[0] ?? AIRCRAFT[0]!.id)
     const weather = createWeather(weatherParamsFor(today, route))
+    const terrain = createTerrain(terrainParamsFor(today, route))
+    world.setTerrain(terrain)
     world.setWeather(weather)
     flow.setWeather(weather)
     world.setRoute(route)
     world.setAircraft(spec, liveryOf(spec.id))
     world.setGhosts([])
-    const demo = createFlightSession({ daily: today, route, spec, weather, pilot: 'demo', ghosts: [] })
+    const demo = createFlightSession({ daily: today, route, spec, weather, terrain, pilot: 'demo', ghosts: [] })
     mode = { kind: 'title', demo, autopilot: createAutopilot('surfer', spec, route, weather) }
   }
 
@@ -215,11 +219,13 @@ export function startApp(root: HTMLElement): void {
     if (!route) throw new Error(`Route ${routeId} not found in WORLD WEATHER #${daily.number}`)
     const spec = specFor(aircraftId)
     const weather = createWeather(weatherParamsFor(daily, route))
+    const terrain = createTerrain(terrainParamsFor(daily, route))
     const localCode = store.bestGhost(daily.number, route.id, 'speed')
     // Racing your own shared link: the friend ghost and the local best are the same flight (same code).
     const localBest = localCode && localCode !== race?.code ? readGhost(localCode) : null
     const ghosts = [race, localBest].filter((g): g is RaceGhost => g !== null).map((g) => g.ghost)
 
+    world.setTerrain(terrain)
     world.setWeather(weather)
     flow.setWeather(weather)
     world.setRoute(route)
@@ -229,7 +235,7 @@ export function startApp(root: HTMLElement): void {
     screens.hide()
     hud.setVisible(true)
     audio.setScene('flight')
-    const session = createFlightSession({ daily, route, spec, weather, pilot: progress.pilot, ghosts })
+    const session = createFlightSession({ daily, route, spec, weather, terrain, pilot: progress.pilot, ghosts })
     if (race) races.set(session, race)
     // Start hands-off in trim: the aircraft's trimmed throttle, not whatever the last flight left.
     input.resetForFlight(session.state().throttle)

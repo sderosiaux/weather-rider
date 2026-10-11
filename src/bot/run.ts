@@ -1,7 +1,7 @@
 // Headless flight: the exact stepping and telemetry of game/session.ts (flight step → weather sample →
 // score tracker → ghost recorder at SIM_DT), minus DOM, three and wall-clock time.
 import { SIM_DT } from '../core/constants'
-import type { AircraftSpec, AircraftState, Controls, FlightScore, Ghost, MutableWeatherSample, Route, WeatherField } from '../core/types'
+import type { AircraftSpec, AircraftState, Controls, FlightEnv, FlightScore, Ghost, MutableWeatherSample } from '../core/types'
 import { flightModel } from '../flight'
 import { createGhostRecorder, createScoreTracker, scoreReference } from '../scoring'
 
@@ -30,7 +30,8 @@ export interface RunOptions {
   readonly maxTimeS?: number
 }
 
-export function runFlight(spec: AircraftSpec, route: Route, weather: WeatherField, pilot: Pilot, opts: RunOptions = {}): RunResult {
+export function runFlight(spec: AircraftSpec, env: FlightEnv, pilot: Pilot, opts: RunOptions = {}): RunResult {
+  const { route, weather } = env
   const tracker = createScoreTracker(spec, route)
   const recorder = createGhostRecorder({ pilot: opts.pilotName ?? 'bot', dailyNumber: opts.dailyNumber ?? 0, routeId: route.id, aircraftId: spec.id })
   const sample: MutableWeatherSample = { wind: { x: 0, y: 0, z: 0 }, turbulence: 0, dominant: null, cloud: 0 }
@@ -38,7 +39,7 @@ export function runFlight(spec: AircraftSpec, route: Route, weather: WeatherFiel
   const maxTime = opts.maxTimeS ?? Math.max(1.5 * ref.timeS, 1.35 * ref.ecoTimeS)
   const maxSteps = Math.ceil(maxTime / SIM_DT)
 
-  let state = flightModel.initialState(spec, route, weather)
+  let state = flightModel.initialState(spec, env)
   recorder.push(state)
   let fuelEmptyAtS: number | null = null
   let maxAltitude = state.pos.y
@@ -53,7 +54,7 @@ export function runFlight(spec: AircraftSpec, route: Route, weather: WeatherFiel
 
   while (state.status === 'flying' && steps < maxSteps) {
     const controls = pilot(state)
-    state = flightModel.step(spec, state, controls, weather, route, SIM_DT)
+    state = flightModel.step(spec, state, controls, env, SIM_DT)
     const w = weather.sample(state.pos, state.t, sample)
     tracker.push({ state, controls, weather: { wind: { ...w.wind }, turbulence: w.turbulence, dominant: w.dominant, cloud: w.cloud }, dt: SIM_DT })
     recorder.push(state)

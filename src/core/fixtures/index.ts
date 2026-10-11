@@ -7,6 +7,8 @@ import type {
   Ghost,
   MutableWeatherSample,
   Route,
+  Terrain,
+  TerrainCover,
   WeatherField,
   WeatherFeature,
   WeatherSample,
@@ -162,5 +164,59 @@ export function createFixtureGhost(offsetS = 3): Ghost {
       comfort: 80, severeTurbulenceS: 0, stress: 20, weatherUtilization: 40, smooth: 800, speed: 700, eco: 600,
     },
     samples,
+  }
+}
+
+/**
+ * Analytic terrain for module sandboxes/tests: coast west of the start, rolling hills, one ridge crossing the
+ * route around x = 60 km (peak 2.2 km), a river meandering along it, a city under the start and one under the gate.
+ */
+export function createFixtureTerrain(seed = 1): Terrain {
+  const riverZ = (x: number): number => 6000 * Math.sin(x / 17_000 + seed)
+  const ridge = (x: number, z: number): number => 2200 * Math.exp(-(((x - 60_000) / 3500) ** 2)) * (0.75 + 0.25 * Math.cos(z / 11_000))
+  const coast = (x: number): number => smoothstep(-12_000, -4000, x)
+  const heightAt = (x: number, z: number): number => {
+    const hills = 250 + 180 * Math.sin(x / 7000) * Math.cos(z / 9000) + 90 * Math.sin((x + z) / 2300)
+    const valley = 1 - 0.7 * Math.exp(-(((z - riverZ(x)) / 2500) ** 2))
+    return -400 + (400 + hills * valley + ridge(x, z)) * coast(x)
+  }
+  const cities = [
+    { id: 'dep', name: fixtureRoute.from, center: v3(0, heightAt(0, 0), 0), radius: 4000, role: 'departure' as const },
+    { id: 'arr', name: fixtureRoute.to, center: v3(fixtureRoute.gate.x, heightAt(fixtureRoute.gate.x, 0), 0), radius: 4000, role: 'arrival' as const },
+  ]
+  const coverAt = (x: number, z: number): TerrainCover => {
+    const h = heightAt(x, z)
+    if (h <= 0) return 'sea'
+    if (h < 25) return 'beach'
+    for (const c of cities) if (Math.hypot(x - c.center.x, z - c.center.z) < c.radius) return 'city'
+    if (x > 10_000 && Math.abs(z - riverZ(x)) < 120) return 'river'
+    if (h > 1900) return 'snow'
+    if (h > 1300) return 'rock'
+    return Math.sin(x / 1700) * Math.sin(z / 1300) > 0.2 ? 'forest' : Math.sin(x / 900 + z / 1100) > 0 ? 'fields' : 'grass'
+  }
+  const river = { id: 'river-1', width: 240, path: Array.from({ length: 19 }, (_, i) => { const x = 10_000 + i * 5000; return v3(x, heightAt(x, riverZ(x)), riverZ(x)) }) }
+  return {
+    seed,
+    boundsMin: v3(-10_000, 0, -30_000),
+    boundsMax: v3(110_000, 14_000, 30_000),
+    heightAt,
+    coverAt,
+    cities,
+    rivers: [river],
+    maxHeight: 400 + 520 + 2200,
+  }
+}
+
+/** Open sea everywhere (ground below the surface): the pre-terrain world, for tests that must not hit hills. */
+export function createFlatTerrain(): Terrain {
+  return {
+    seed: 0,
+    boundsMin: v3(-1e6, 0, -1e6),
+    boundsMax: v3(1e6, 14_000, 1e6),
+    heightAt: () => -100,
+    coverAt: () => 'sea',
+    cities: [],
+    rivers: [],
+    maxHeight: 0,
   }
 }
