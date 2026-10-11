@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Terrain sandbox · Weather Rider</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --panel: #ffffff;
+        --border: #e3e6eb;
+        --text: #1b2330;
+        --muted: #6b7482;
+        --accent: #2563eb;
+        --accent-soft: #e8efff;
+        --radius: 10px;
+        --font: ui-sans-serif, -apple-system, 'Inter', 'Segoe UI', sans-serif;
+        --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 13px/1.4 var(--font); color: var(--text); background: var(--bg); }
+      .app { display: grid; grid-template-columns: 250px 1fr; min-height: 100vh; }
+      aside { background: var(--panel); border-right: 1px solid var(--border); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+      h1 { font-size: 15px; margin: 0; }
+      h1 small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; margin-top: 2px; }
+      label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+      input[type='number'], select { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
+      .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .checks label { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+      .buttons { display: flex; gap: 6px; }
+      button { font: inherit; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+      button:hover { background: var(--accent-soft); border-color: var(--accent); }
+      button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .stats, .readout { font-family: var(--mono); font-size: 11.5px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; white-space: pre-wrap; }
+      main { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+      .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+      .card header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+      .card header b { font-size: 13px; }
+      .card header span { color: var(--muted); font-size: 12px; }
+      .stack { position: relative; }
+      .stack canvas { display: block; }
+      .stack canvas + canvas { position: absolute; inset: 0; }
+      .legend { display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 11.5px; margin-top: 6px; }
+      .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; border: 1px solid rgba(0, 0, 0, 0.12); }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside>
+        <h1>Terrain sandbox<small>createTerrain debug viewer</small></h1>
+        <label>World Weather day <input id="day" type="number" value="284" min="1" /></label>
+        <label>Route <select id="route"></select></label>
+        <label>Seed override (blank = daily) <input id="seed" type="number" placeholder="daily" /></label>
+        <div class="buttons"><button id="route-view" class="on">Route</button><button id="horizon-view">Horizon</button><button id="next">Next day</button></div>
+        <div class="checks">
+          <label><input id="shade" type="checkbox" checked /> Hillshade</label>
+          <label><input id="cover" type="checkbox" checked /> Cover</label>
+          <label><input id="rivers" type="checkbox" checked /> River lines</label>
+          <label><input id="labels" type="checkbox" checked /> Cities</label>
+          <label><input id="zones" type="checkbox" checked /> Clearance</label>
+          <label><input id="contours" type="checkbox" /> Contours</label>
+        </div>
+        <div class="stats" id="stats"></div>
+        <div class="readout" id="readout">hover the map</div>
+      </aside>
+      <main>
+        <section class="card">
+          <header><b>Top-down</b><span id="mapTitle"></span></header>
+          <div class="stack" id="mapStack"><canvas id="map"></canvas><canvas id="mapFx"></canvas></div>
+          <div class="legend" id="legend"></div>
+        </section>
+        <section class="card">
+          <header><b>Profile along the straight start → gate line</b><span>ground on the line (cover colours), highest ground within ±4 km (grey), ceilings (red dashed), start / gate window (blue)</span></header>
+          <canvas id="profile"></canvas>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="./terrain.ts"></script>
+  </body>
+</html>
