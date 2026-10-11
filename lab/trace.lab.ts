@@ -12,7 +12,7 @@ it.skipIf(!process.env.AC)('trace', () => {
   const route = daily.routes[Number(process.env.R ?? 0)]!
   const spec = aircraftById(process.env.AC ?? 'regional')
   const weather = createWeather(weatherParamsFor(daily, route))
-      const terrain = createTerrain(terrainParamsFor(daily, route))
+  const terrain = createTerrain(terrainParamsFor(daily, route))
   const st = (process.env.ST ?? 'surfer') as Strategy
   const pilot = createAutopilot(st, spec, route, weather, { profile: JSON.parse(process.env.PROFILE ?? '{}'), trace: (t, e) => console.log(`  [${t.toFixed(0)}] ${e}`) })
   let n = 0
