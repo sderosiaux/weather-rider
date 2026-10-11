@@ -25,9 +25,10 @@ const SNOW_LINE = 2250
 const ROCK_LINE = 1850
 const TREE_LINE = 1650
 const FIELDS_MAX = 1100
-/** Farm patchwork: warped rotated grid of fields (m). */
-const PATCH_U = 1150
-const PATCH_V = 780
+/** Open-land patches (m): woodlot and field noise wavelengths, and the domain warp that bends their edges. */
+const WOOD_WAVELENGTH = 1900
+const FIELD_WAVELENGTH = 2200
+const WARP = 700
 
 /** Shoreline wiggle: depth noise amplitude (m) and wavelength (m). */
 const SHORE_NOISE = 12
@@ -146,7 +147,6 @@ export interface SamplerInput {
   readonly clearance: Clearance
   readonly minCap: number
   readonly noises: Noises
-  readonly seed: number
 }
 
 
@@ -203,10 +203,6 @@ export function createSampler(inp: SamplerInput): Sampler {
   const cityLevel = new Float64Array(MAX_CITIES)
   let cityCount = 0
 
-  const patchSeed = inp.seed | 0
-  const pa = ((inp.seed >>> 8) % 628) / 100
-  const pc = Math.cos(pa)
-  const ps = Math.sin(pa)
 
   const S = new Float64Array(10)
 
@@ -409,28 +405,14 @@ export function createSampler(inp: SamplerInput): Sampler {
     if (alt > TREE_LINE) return 'grass'
     const forest = S[S_FOREST]! + 0.5 * cn + (S[S_RIDGE_AMP]! > 150 ? 0.15 : 0)
     if (forest > 0.75) return 'forest'
-    // Patchwork: a warped, rotated grid of parcels, each one fields, meadow or a woodlot.
+    // Farmland and meadow, with woodlots: thresholded noise (multi-octave, so blobs of every size from a few
+    // hundred metres to a few km with organic outlines). A cell grid reads as tiles from cruise altitude.
     const hn = S[S_HN]!
-    const u = (x * pc + z * ps) / PATCH_U + 0.8 * hn
-    const v = (z * pc - x * ps) / PATCH_V - 0.6 * hn
-    let iu = Math.floor(u)
-    let iv = Math.floor(v)
-    // Some parcels merge into bigger blocks (3 × 2), so the patchwork is not one uniform grid.
-    const bu = Math.floor(u / 3)
-    const bv = Math.floor(v / 2)
-    let hb = Math.imul(bu, 0x2c1b3c6d) ^ Math.imul(bv, 0x297a2d39) ^ patchSeed
-    hb = Math.imul(hb ^ (hb >>> 15), 0x85ebca6b)
-    hb ^= hb >>> 13
-    if ((hb >>> 0) < 0x70000000) {
-      iu = bu + 0x40000
-      iv = bv + 0x40000
-    }
-    let hs = Math.imul(iu, 0x27d4eb2d) ^ Math.imul(iv, 0x165667b1) ^ patchSeed
-    hs = Math.imul(hs ^ (hs >>> 15), 0x85ebca6b)
-    hs = Math.imul(hs ^ (hs >>> 13), 0xc2b2ae35)
-    const p = ((hs ^ (hs >>> 16)) >>> 0) / 4294967296
-    if (p < 0.72 * S[S_FARM]! && h < FIELDS_MAX) return 'fields'
-    if (p > 0.95 - 0.12 * S[S_FOREST]!) return 'forest'
+    const wx = x + WARP * hn
+    const wz = z - WARP * hn
+    if (coverNoise.fbm(wx - 37_000, wz + 11_000, WOOD_WAVELENGTH, 2) > 0.34 - 0.25 * S[S_FOREST]!) return 'forest'
+    // fBm is roughly normal with σ ≈ 0.3: with farm 0.9 about 70 % of the open land is fields, 0.5 half of it.
+    if (h < FIELDS_MAX && coverNoise.fbm(wx + 23_000, wz - 52_000, FIELD_WAVELENGTH, 3) < 0.4 * (S[S_FARM]! - 0.5)) return 'fields'
     return 'grass'
   }
 
