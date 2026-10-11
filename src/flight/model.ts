@@ -29,7 +29,7 @@ import {
   v3,
 } from '../core/math'
 import { hashInts } from '../core/rng'
-import type { AircraftSpec, AircraftState, Controls, FlightModel, MutableWeatherSample, Route, Vec3, WeatherField } from '../core/types'
+import type { AircraftSpec, AircraftState, Controls, FlightEnv, FlightModel, MutableWeatherSample, Route, Terrain, Vec3 } from '../core/types'
 import {
   CL0,
   CL_ALPHA,
@@ -109,8 +109,9 @@ export function headingOf(orientation: AircraftState['orientation']): number {
 }
 
 /** Trimmed for cruise airspeed along startHeading; the ground velocity includes the wind at the start. */
-export function initialState(spec: AircraftSpec, route: Route, weather: WeatherField): AircraftState {
-  const w = weather.sample(route.start, 0, scratch).wind
+export function initialState(spec: AircraftSpec, env: FlightEnv): AircraftState {
+  const { route } = env
+  const w = env.weather.sample(route.start, 0, scratch).wind
   const wind = v3(w.x, w.y, w.z)
   const h = normalize(v3(route.startHeading.x, 0, route.startHeading.z))
   const dir = length(h) > 0 ? h : BODY_FORWARD
@@ -141,15 +142,18 @@ function inGate(pos: Vec3, route: Route): boolean {
   return dx * dx + dz * dz <= route.gateRadius * route.gateRadius && pos.y >= route.gateMinAlt && pos.y <= route.gateMaxAlt
 }
 
+/** Water surfaces sit at the local ground height, the sea at 0: below either is the ground. */
+const onGround = (pos: Vec3, terrain: Terrain): boolean => pos.y <= Math.max(terrain.heightAt(pos.x, pos.z), 0)
+
 export function step(
   spec: AircraftSpec,
   state: AircraftState,
   controls: Controls,
-  weather: WeatherField,
-  route: Route,
+  env: FlightEnv,
   dt: number,
 ): AircraftState {
   if (state.status !== 'flying') return state
+  const { weather, route } = env
   const aero = aeroOf(spec)
   const tick = Math.round(state.t / dt)
   const w = weather.sample(state.pos, state.t, scratch)
@@ -252,7 +256,13 @@ export function step(
   )
   const broken = stress >= 1 || gLoad / limit > INSTANT_FAILURE_FACTOR
 
-  const status: AircraftState['status'] = pos.y <= 0 ? 'crashed' : broken ? 'overstressed' : inGate(pos, route) ? 'arrived' : 'flying'
+  const status: AircraftState['status'] = onGround(pos, env.terrain)
+    ? 'crashed'
+    : broken
+      ? 'overstressed'
+      : inGate(pos, route)
+        ? 'arrived'
+        : 'flying'
 
   return {
     t: state.t + dt,
