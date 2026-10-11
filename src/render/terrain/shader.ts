@@ -20,6 +20,23 @@ function levelGlsl(levels: number): string {
     uniform vec4 uLev[${levels}];
     // Valid (baked) world rectangle: minX, minZ, maxX, maxZ.
     uniform vec4 uRect[${levels}];
+    // Cubic B-spline filtering from 4 bilinear taps: cover borders become smooth curves instead of the
+    // diamond stair-steps bilinear interpolation draws around each texel.
+    vec4 cubicTex(sampler2D t, vec2 uv, float size) {
+      vec2 st = uv * size - 0.5;
+      vec2 i = floor(st);
+      vec2 f = st - i;
+      vec2 f2 = f * f, f3 = f2 * f;
+      vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+      vec2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+      vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+      vec2 w3 = f3 / 6.0;
+      vec2 g0 = w0 + w1, g1 = w2 + w3;
+      vec2 h0 = (i - 0.5 + w1 / g0) / size;
+      vec2 h1 = (i + 1.5 + w3 / g1) / size;
+      return g0.y * (g0.x * textureLod(t, vec2(h0.x, h0.y), 0.0) + g1.x * textureLod(t, vec2(h1.x, h0.y), 0.0))
+           + g1.y * (g0.x * textureLod(t, vec2(h0.x, h1.y), 0.0) + g1.x * textureLod(t, vec2(h1.x, h1.y), 0.0));
+    }
     float levelWeight(vec2 p, int i) {
       vec4 r = uRect[i];
       float d = min(min(p.x - r.x, r.z - p.x), min(p.y - r.y, r.w - p.y));
@@ -45,14 +62,25 @@ function heightGlsl(levels: number): string {
 /** Full ground sample (fragment shader): height, gradient and cover weights, level picked by footprint too. */
 function groundGlsl(levels: number): string {
   const add = Array.from({ length: levels }, (_, i) => /* glsl */ `
-    void addLevel${i}(vec2 p, vec2 warp, float w, inout Ground g) {
+    void addLevel${i}(vec2 p, vec2 warp, float w, float fp, inout Ground g) {
       vec2 uv = p * uLev[${i}].x;
       float d = uLev[${i}].w;
       // Cover borders pushed around by more than a texel, or coarse levels show their grid as blocks.
       vec2 pc = p + warp * max(uLev[${i}].y * 2.2, 160.0);
+      float size = 1.0 / d;
       vec4 a0 = textureLod(uT0_${i}, uv, 0.0);
-      vec4 a = textureLod(uT0_${i}, pc * uLev[${i}].x, 0.0);
-      vec4 b = textureLod(uT1_${i}, pc * uLev[${i}].x, 0.0);
+      float water;
+      vec4 a, b;
+      // Cubic only where a texel covers more than a pixel or so; minified, bilinear is already smooth.
+      if (uLev[${i}].y > 1.5 * fp) {
+        water = cubicTex(uT0_${i}, uv, size).g;
+        a = cubicTex(uT0_${i}, pc * uLev[${i}].x, size);
+        b = cubicTex(uT1_${i}, pc * uLev[${i}].x, size);
+      } else {
+        water = a0.g;
+        a = textureLod(uT0_${i}, pc * uLev[${i}].x, 0.0);
+        b = textureLod(uT1_${i}, pc * uLev[${i}].x, 0.0);
+      }
       float hx0 = textureLod(uT0_${i}, uv - vec2(d, 0.0), 0.0).r;
       float hx1 = textureLod(uT0_${i}, uv + vec2(d, 0.0), 0.0).r;
       float hz0 = textureLod(uT0_${i}, uv - vec2(0.0, d), 0.0).r;
@@ -60,7 +88,7 @@ function groundGlsl(levels: number): string {
       g.h += w * a0.r;
       g.grad += w * vec2(hx1 - hx0, hz1 - hz0) / (2.0 * uLev[${i}].y);
       // Water stays where the terrain put it (banks and coasts are smooth); land covers take the warp.
-      g.c0 += w * vec3(a0.g, a.ba);
+      g.c0 += w * vec3(water, a.ba);
       g.c1 += w * b;
       g.texel += w * uLev[${i}].y;
     }`).join('\n')
@@ -69,7 +97,7 @@ function groundGlsl(levels: number): string {
     const footprint = i === levels - 1 ? '1.0' : `(1.0 - smoothstep(uLev[${i}].y, uLev[${i}].y * 2.5, fp))`
     return /* glsl */ `
     w = levelWeight(p, ${i}) * ${footprint} * rem;
-    if (w > 0.001) { addLevel${i}(p, warp, w, g); rem -= w; }`
+    if (w > 0.001) { addLevel${i}(p, warp, w, fp, g); rem -= w; }`
   }).join('')
   return /* glsl */ `
     struct Ground {
@@ -131,16 +159,22 @@ export function terrainFragmentShader(levels: number): string {
     ${ATMOSPHERE_GLSL}
     ${levelGlsl(levels)}
     ${groundGlsl(levels)}
-    ${heightGlsl(levels)}
-    // Low sun, long shadows: march toward the sun over the height maps (steps growing to ~12 km).
+    // Heights for the shadow march: one fetch, from the second level (or the third beyond it). Shadows are
+    // soft and seen from kilometres up; the finest level would cost more and show nothing more.
+    float shadowHeight(vec2 p) {
+      vec4 r = uRect[1];
+      bool inB = p.x > r.x && p.x < r.z && p.y > r.y && p.y < r.w;
+      return inB ? textureLod(uT0_1, p * uLev[1].x, 0.0).r : textureLod(uT0_2, p * uLev[2].x, 0.0).r;
+    }
+    // Low sun, long shadows: march toward the sun over the height maps (steps growing to ~8 km).
     float terrainShadow(vec3 pos) {
       vec2 l = normalize(uSunDir.xz);
       float slope = uSunDir.y / length(uSunDir.xz);
       float t = 0.0, stride = 45.0, occ = 0.0;
-      for (int k = 0; k < 10; k++) {
+      for (int k = 0; k < 8; k++) {
         t += stride;
-        stride *= 1.65;
-        float over = groundHeight(pos.xz + l * t) - (pos.y + t * slope);
+        stride *= 1.9;
+        float over = shadowHeight(pos.xz + l * t) - (pos.y + t * slope);
         // Bias grows with distance: coarse texels must not shadow themselves (blocky acne).
         occ = max(occ, smoothstep(15.0 + t * 0.01, 60.0 + t * 0.04, over));
       }
@@ -310,9 +344,10 @@ export function terrainFragmentShader(levels: number): string {
       float glint = 0.0;
       float micro = 0.0;
       if (wGrass > 0.0) {
-        vec3 grass = mix(vec3(0.11, 0.19, 0.045), vec3(0.25, 0.26, 0.08), nMacro.r) * (0.8 + 0.45 * nMid.a) * (0.85 + 0.3 * nCanopy.a);
+        vec3 grass = mix(vec3(0.15, 0.24, 0.055), vec3(0.31, 0.31, 0.10), nMacro.r) * (0.8 + 0.45 * nMid.a) * (0.85 + 0.3 * nCanopy.a);
         // Copses and hedgerow trees scattered over pasture.
-        grass = mix(grass, vec3(0.035, 0.07, 0.03), smoothstep(0.62, 0.7, nFine.r * 0.7 + nCanopy.r * 0.3) * 0.85);
+        // Low-frequency noise only: a pixel-scale threshold would sparkle along every border.
+        grass = mix(grass, vec3(0.05, 0.09, 0.035), smoothstep(0.6, 0.75, nFine.r * 0.8 + nMid.a * 0.2) * 0.7);
         albedo += wGrass * grass;
       }
       if (wFields > 0.0) albedo += wFields * fieldsAlbedo(p, fpPat, nRegion.gb, nCanopy.a * 0.5 + nFine.r * 0.5);
@@ -320,9 +355,12 @@ export function terrainFragmentShader(levels: number): string {
         // Clumps and clearings read from kilometres away; crowns only up close.
         float clumps = smoothstep(0.25, 0.75, nFine.r * 0.6 + nMid.a * 0.4);
         // Stands of different trees over kilometres: blue-green conifers, yellow-green broadleaf, olive scrub.
-        vec3 stand = mix(vec3(0.03, 0.07, 0.045), vec3(0.085, 0.12, 0.035), smoothstep(0.3, 0.7, nMacro.a));
-        stand = mix(stand, vec3(0.11, 0.11, 0.05), smoothstep(0.62, 0.8, nRegion.r) * 0.6);
-        vec3 forest = stand * (0.6 + 0.6 * clumps) * (0.65 + 0.7 * nCanopy.r);
+        // Kept luminous: from the air a forest is a mosaic of greens, not a dark mass.
+        vec3 stand = mix(vec3(0.05, 0.105, 0.06), vec3(0.15, 0.2, 0.05), smoothstep(0.3, 0.7, nMacro.a));
+        stand = mix(stand, vec3(0.19, 0.17, 0.065), smoothstep(0.55, 0.75, nRegion.r) * 0.55);
+        stand = mix(stand, vec3(0.09, 0.15, 0.08), smoothstep(0.6, 0.8, nMid.g) * 0.5);
+        stand *= 0.8 + 0.45 * smoothstep(0.3, 0.7, nMid.r);
+        vec3 forest = stand * (0.72 + 0.5 * clumps) * (0.75 + 0.5 * nCanopy.r);
         albedo += wForest * forest;
         micro += wForest;
       }
@@ -357,7 +395,7 @@ export function terrainFragmentShader(levels: number): string {
         shadow = max(shadow, c.w * (1.0 - smoothstep(0.35, 1.0, d)));
       }
       // Cast shadows only where they can still be seen through the haze.
-      float castShadow = dist < 90000.0 ? terrainShadow(vec3(p.x, max(g.h, 0.0), p.y)) * (1.0 - smoothstep(60000.0, 90000.0, dist)) : 0.0;
+      float castShadow = dist < 60000.0 ? terrainShadow(vec3(p.x, max(g.h, 0.0), p.y)) * (1.0 - smoothstep(40000.0, 60000.0, dist)) : 0.0;
       shadow = max(shadow, castShadow * 0.9);
       float sunLit = smoothstep(-0.2, 0.7, dot(ln, uSunDir)) * (1.0 - 0.85 * shadow);
       vec3 ambient = mix(vec3(0.10, 0.12, 0.21), vec3(0.34, 0.41, 0.62), 0.5 + 0.5 * ln.y);

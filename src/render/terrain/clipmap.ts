@@ -6,20 +6,27 @@
 // Channel layout (shared with shader.ts):
 //   t0 (RGBA half): ground height (m), water, beach, city
 //   t1 (RGBA u8):   fields, forest, rock, snow — grass is whatever weight is left (1 − Σ)
-// One-hot per texel: bilinear filtering turns cover classes into smooth blend weights.
+// Per texel: the share of each class over its sub-samples (one-hot when coverSamples = 1). Filtering
+// turns those into smooth blend weights.
 import { DataUtils } from 'three'
 import type { Terrain, TerrainCover } from '../../core/types'
 
 /** Texels per block side. Every level size is a multiple of it. */
 export const BLOCK = 32
 const NONE = -0x7fffffff
-const HALF_ONE = DataUtils.toHalfFloat(1)
+/** Scratch: share per channel index + 1 (index 0 = grass). */
+const shares = new Float64Array(9)
 
 export interface LevelSpec {
   /** Meters per texel. */
   readonly texel: number
   /** Texels per side. */
   readonly size: number
+  /**
+   * Cover samples per texel side (1 or 2). With 2, each texel stores the coverage of each class over a
+   * 2×2 sub-grid: borders land between texels instead of snapping to them. Costs 4 coverAt per texel.
+   */
+  readonly coverSamples?: number
 }
 
 export interface ClipLevel extends LevelSpec {
@@ -114,6 +121,8 @@ const CHANNEL: Readonly<Record<TerrainCover, number>> = {
  */
 export function bakeBlock(level: ClipLevel, terrain: Terrain, bx: number, bz: number): { sx: number; sz: number; maxHeight: number } {
   const { texel, size, t0, t1 } = level
+  const n = level.coverSamples ?? 1
+  const inv = 1 / (n * n)
   const sx = mod(bx, level.blocks) * BLOCK
   const sz = mod(bz, level.blocks) * BLOCK
   let maxHeight = -Infinity
@@ -125,11 +134,21 @@ export function bakeBlock(level: ClipLevel, terrain: Terrain, bx: number, bz: nu
       const h = terrain.heightAt(x, z)
       if (h > maxHeight) maxHeight = h
       t0[o] = DataUtils.toHalfFloat(h)
-      t0[o + 1] = t0[o + 2] = t0[o + 3] = 0
-      t1[o] = t1[o + 1] = t1[o + 2] = t1[o + 3] = 0
-      const ch = CHANNEL[terrain.coverAt(x, z)]
-      if (ch >= 4) t1[o + ch - 4] = 255
-      else if (ch >= 1) t0[o + ch] = HALF_ONE
+      shares.fill(0)
+      if (n === 1) {
+        shares[CHANNEL[terrain.coverAt(x, z)] + 1]! += 1
+      } else {
+        for (let sj = 0; sj < n; sj++) {
+          for (let si = 0; si < n; si++) {
+            shares[CHANNEL[terrain.coverAt(x + ((si + 0.5) / n - 0.5) * texel, z + ((sj + 0.5) / n - 0.5) * texel)] + 1]! += inv
+          }
+        }
+      }
+      // shares[0] is grass (implicit), 2..4 → t0.gba, 5..8 → t1.rgba.
+      t0[o + 1] = shares[2] ? DataUtils.toHalfFloat(shares[2]) : 0
+      t0[o + 2] = shares[3] ? DataUtils.toHalfFloat(shares[3]) : 0
+      t0[o + 3] = shares[4] ? DataUtils.toHalfFloat(shares[4]) : 0
+      for (let k = 0; k < 4; k++) t1[o + k] = Math.round(shares[5 + k]! * 255)
     }
   }
   const s = slotOf(level, bx, bz)

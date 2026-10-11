@@ -9,12 +9,15 @@ import { bakeBlock, BLOCK, createLevel, missingBlocks, resetLevel, validRect, ty
 import { PATCH_GRID, PATCH_STRIDE, selectPatches, type LodConfig } from './quadtree'
 import { MAX_CITIES, MAX_GROUND_SHADOWS, terrainDistanceFragmentShader, terrainFragmentShader, terrainVertexShader } from './shader'
 
-/** Fine to coarse. Half-extents ≈ 6, 49, 197 and 295 km around the camera. */
+/**
+ * Fine to coarse. Half-extents ≈ 12, 37, 147 and 295 km around the camera: from cruise altitude most of
+ * the visible ground (5–40 km away) is in the two fine levels, whose cover is supersampled.
+ */
 export const LEVELS: readonly LevelSpec[] = [
-  { texel: 24, size: 512 },
-  { texel: 96, size: 1024 },
-  { texel: 384, size: 1024 },
-  { texel: 1536, size: 384 },
+  { texel: 24, size: 1024, coverSamples: 2 },
+  { texel: 72, size: 1024, coverSamples: 2 },
+  { texel: 288, size: 1024, coverSamples: 1 },
+  { texel: 1152, size: 512, coverSamples: 1 },
 ]
 /** Vertex spacing near the camera matches the finest texel; the top level spans ~400 km. */
 const LOD: LodConfig = { leafSize: LEVELS[0]!.texel * PATCH_GRID, levels: 10 }
