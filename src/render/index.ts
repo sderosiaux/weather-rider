@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import type { CreateWorldView, GhostVisual, WorldFrame } from '../core/presentation'
-import type { AircraftSpec, AircraftState, MutableWeatherSample, Route, WeatherField, WeatherFeature } from '../core/types'
+import type { AircraftSpec, AircraftState, MutableWeatherSample, Route, Terrain, WeatherField, WeatherFeature } from '../core/types'
 import { createAircraftVisual } from './aircraft/visual'
 import { createAtmosphereUniforms, createSky, PALETTE, SUN_DIR } from './atmosphere'
 import { createChaseCamera, smoothing } from './camera'
@@ -11,6 +11,7 @@ import { createCloudLayer } from './clouds/mesh'
 import { createGateLayer } from './gate'
 import { createGhostLayer } from './ghosts'
 import { createSea, MAX_SEA_SHADOWS } from './sea'
+import { createTerrainLayer } from './terrain/layer'
 import { createGlowTexture, createNoiseTexture, createPuffAtlas } from './textures'
 
 const NEAR = 0.5
@@ -41,8 +42,8 @@ function upperWindDir(weather: WeatherField): { x: number; y: number; z: number 
   return l > 0.5 ? { x: w.x / l, y: 0, z: w.z / l } : { x: 1, y: 0, z: 0 }
 }
 
-/** Soft cloud shadows on the sea under the biggest vertical clouds. */
-function seaShadows(features: readonly WeatherFeature[]): [number, number, number, number][] {
+/** Soft cloud shadows on the sea and the land under the biggest vertical clouds. */
+function cloudShadows(features: readonly WeatherFeature[]): [number, number, number, number][] {
   const discs: [number, number, number, number][] = []
   for (const f of features) {
     if (f.kind === 'storm') discs.push([f.center.x, f.center.z, f.radius * 2.2, 0.75])
@@ -78,16 +79,22 @@ export const createWorldView: CreateWorldView = (canvas) => {
   const glow = createGlowTexture()
 
   const sky = createSky(atmosphere, noise)
+  // The ground is seen at grazing angles: its own noise copy gets anisotropic filtering.
+  const groundNoise = createNoiseTexture()
+  groundNoise.anisotropy = renderer.capabilities.getMaxAnisotropy()
   const sea = createSea(atmosphere, noise)
-  const clouds = createCloudLayer(atmosphere, atlas)
+  const terrain = createTerrainLayer(atmosphere, groundNoise)
+  const cloudPass = createCloudPass()
+  const clouds = createCloudLayer(atmosphere, atlas, cloudPass.occluderDistance)
   const aircraft = createAircraftVisual(atmosphere, glow)
   const ghosts = createGhostLayer(atmosphere, glow)
   const gate = createGateLayer(atmosphere, glow)
   const chase = createChaseCamera()
 
-  const cloudPass = createCloudPass()
   const cloudScene = new THREE.Scene()
   cloudScene.add(clouds.mesh)
+  const occluderScene = new THREE.Scene()
+  occluderScene.add(terrain.distanceMesh)
 
   const sun = new THREE.DirectionalLight(new THREE.Color(1.0, 0.8, 0.6), 3.2)
   sun.position.copy(SUN_DIR)
@@ -104,7 +111,7 @@ export const createWorldView: CreateWorldView = (canvas) => {
   const hemiGroundFlight = hemi.groundColor.clone()
   /** Showcase bounce: sunlit cloud tops below, instead of the dark sea. */
   const hemiGroundShowcase = new THREE.Color(0.5, 0.47, 0.44)
-  scene.add(sky, sea.mesh, cloudPass.composite, clouds.depthMesh, aircraft.worldObjects, ghosts.group, gate.group, sun, hemi, aircraft.group)
+  scene.add(sky, sea.mesh, terrain.mesh, terrain.buildings, cloudPass.composite, clouds.depthMesh, aircraft.worldObjects, ghosts.group, gate.group, sun, hemi, aircraft.group)
   const drawingSize = new THREE.Vector2()
 
   let weather: WeatherField | null = null
@@ -225,7 +232,14 @@ export const createWorldView: CreateWorldView = (canvas) => {
       weather = w
       const opts = { seed: w.seed, sun: SUN_DIR, windDir: upperWindDir(w) }
       clouds.setPuffs([...layoutClouds(w.features, opts), ...layoutHorizon(w.boundsMin, w.boundsMax, opts)])
-      sea.setShadows(seaShadows(w.features))
+      const shadows = cloudShadows(w.features)
+      sea.setShadows(shadows)
+      terrain.setShadows(shadows)
+    },
+    setTerrain(t: Terrain) {
+      terrain.setTerrain(t)
+      // The land carries its own sea (and lakes, rivers) up to ~300 km around the camera.
+      sea.mesh.visible = false
     },
     setRoute(route: Route) {
       gate.set(route)
@@ -271,11 +285,12 @@ export const createWorldView: CreateWorldView = (canvas) => {
       atmosphere.uTime.value = time
       atmosphere.uInCloud.value = inCloud * 0.85
       sea.follow(camera)
+      terrain.update(camera)
       clouds.sort(camera)
       const pixelAngle = (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / cssHeight
       aircraft.setPixelAngle(pixelAngle)
       ghosts.setPixelAngle(pixelAngle)
-      cloudPass.render(renderer, cloudScene, camera)
+      cloudPass.render(renderer, cloudScene, terrain.hasTerrain ? occluderScene : null, camera)
       // Pass 1: world (sky, sea, composited clouds, trails, gate, ghosts, third-party layers).
       camera.layers.set(0)
       renderer.render(scene, camera)
@@ -304,6 +319,8 @@ export const createWorldView: CreateWorldView = (canvas) => {
       sky.geometry.dispose()
       ;(sky.material as THREE.Material).dispose()
       sea.dispose()
+      terrain.dispose()
+      groundNoise.dispose()
       clouds.dispose()
       cloudPass.dispose()
       aircraft.dispose()

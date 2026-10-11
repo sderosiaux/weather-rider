@@ -7,10 +7,16 @@
 //   livery=<hex without #>   override the livery (showcase + flight)
 //   level=1        wings level (the fixture banks up to knife-edge; handy to inspect silhouettes)
 //   stress=<n>     render n times per frame (GPU headroom: fps × n = frames the GPU could sustain)
-import { qFromAxisAngle, v3 } from '../src/core/math'
+//   terrain=fixture  land under the route (createFixtureTerrain); default: the endless sea
+//   y=<m>          absolute altitude (overrides the fixture's altitude profile)
+//   (window.__render.gpuMs: GPU time of view.render(), EXT_disjoint_timer_query_webgl2, mean of the last 120 frames)
+//   at=<x>,<z>     horizontal position override (m), e.g. over a city
+//   dive=<deg>     nose and flight path pitched down (the chase camera then looks at the ground)
+import { qFromAxisAngle, qMul, v3 } from '../src/core/math'
 import { createRng } from '../src/core/rng'
 import {
   createFixtureGhost,
+  createFixtureTerrain,
   createFixtureWeather,
   fixtureAircraft,
   fixtureFlightState,
@@ -22,6 +28,9 @@ import { createWorldView } from '../src/render'
 const params = new URLSearchParams(location.search)
 const frozenT = params.has('t') ? Number(params.get('t')) : null
 const altOffset = Number(params.get('alt') ?? 0)
+const absAlt = params.has('y') ? Number(params.get('y')) : null
+const at = params.get('at')?.split(',').map(Number) ?? null
+const dive = (Number(params.get('dive') ?? 0) * Math.PI) / 180
 const stress = Math.max(1, Number(params.get('stress') ?? 1))
 if (params.get('clean') === '1') document.body.classList.add('clean')
 
@@ -71,6 +80,7 @@ function poseAt(ghost: Ghost, t: number): GhostSample {
 const canvas = document.getElementById('view') as HTMLCanvasElement
 const view = createWorldView(canvas)
 const weather = params.get('weather') === 'fixture' ? createFixtureWeather(1) : richWeather()
+if (params.get('terrain') === 'fixture') view.setTerrain(createFixtureTerrain(1))
 view.setWeather(weather)
 view.setRoute(fixtureRoute)
 
@@ -116,8 +126,16 @@ resize()
 const level = params.get('level') === '1'
 const stateAt = (t: number): AircraftState => {
   const s = fixtureFlightState(t)
-  const orientation = level ? qFromAxisAngle(v3(0, 1, 0), Math.atan2(-s.vel.z, s.vel.x)) : s.orientation
-  return { ...s, orientation, pos: v3(s.pos.x, s.pos.y + altOffset, s.pos.z) }
+  let orientation = level ? qFromAxisAngle(v3(0, 1, 0), Math.atan2(-s.vel.z, s.vel.x)) : s.orientation
+  let vel = s.vel
+  if (dive) {
+    // Pitch about the body's right wing (+z): negative = nose down.
+    orientation = qMul(orientation, qFromAxisAngle(v3(0, 0, 1), -dive))
+    const h = Math.hypot(s.vel.x, s.vel.z)
+    const sp = Math.hypot(h, s.vel.y)
+    vel = v3((s.vel.x / h) * sp * Math.cos(dive), -sp * Math.sin(dive), (s.vel.z / h) * sp * Math.cos(dive))
+  }
+  return { ...s, orientation, vel, pos: v3(at ? at[0]! : s.pos.x, absAlt ?? s.pos.y + altOffset, at ? at[1]! : s.pos.z) }
 }
 
 const fpsEl = document.getElementById('fps')!
@@ -126,7 +144,26 @@ let simT = frozenT ?? 20
 let last = performance.now()
 let frames = 0
 let fpsWindowStart = last
-const stats = { fps: 0, frameMs: 0 }
+/** firstRenderMs: the first render() after setTerrain, which bakes the coarsest ground level synchronously. */
+const stats = { fps: 0, frameMs: 0, gpuMs: 0, firstRenderMs: -1 }
+
+// GPU time per frame via timer queries (results arrive a few frames late).
+const gl = view.renderer.getContext() as WebGL2RenderingContext
+const timer = gl.getExtension('EXT_disjoint_timer_query_webgl2') as { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null
+const pendingQueries: WebGLQuery[] = []
+const gpuSamples: number[] = []
+const pollQueries = (): void => {
+  while (pendingQueries.length > 0) {
+    const q = pendingQueries[0]!
+    if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) break
+    pendingQueries.shift()
+    const ns = gl.getQueryParameter(q, gl.QUERY_RESULT) as number
+    if (!gl.getParameter(timer!.GPU_DISJOINT_EXT)) gpuSamples.push(ns / 1e6)
+    gl.deleteQuery(q)
+  }
+  while (gpuSamples.length > 120) gpuSamples.shift()
+  stats.gpuMs = gpuSamples.reduce((a, b) => a + b, 0) / Math.max(1, gpuSamples.length)
+}
 ;(window as unknown as { __render: typeof stats }).__render = stats
 
 const loop = (now: number): void => {
@@ -137,12 +174,21 @@ const loop = (now: number): void => {
   const ghostPose = poseAt(ghost, simT)
   view.update({ state, ghostPoses: [altOffset ? { ...ghostPose, pos: v3(ghostPose.pos.x, ghostPose.pos.y + altOffset, ghostPose.pos.z) } : ghostPose], dtReal })
   const t0 = performance.now()
+  const query = timer ? gl.createQuery() : null
+  if (query) gl.beginQuery(timer!.TIME_ELAPSED_EXT, query)
+  const r0 = performance.now()
   for (let i = 0; i < stress; i++) view.render()
+  if (stats.firstRenderMs < 0) stats.firstRenderMs = performance.now() - r0
+  if (query) {
+    gl.endQuery(timer!.TIME_ELAPSED_EXT)
+    pendingQueries.push(query)
+  }
+  if (timer) pollQueries()
   frames++
   if (now - fpsWindowStart > 1000) {
     stats.fps = (frames * 1000) / (now - fpsWindowStart)
     stats.frameMs = performance.now() - t0
-    fpsEl.textContent = `${stats.fps.toFixed(0)} fps`
+    fpsEl.textContent = `${stats.fps.toFixed(0)} fps · GPU ${stats.gpuMs.toFixed(2)} ms`
     infoEl.textContent = `t=${simT.toFixed(0)}s  alt=${state.pos.y.toFixed(0)}m  ${canvas.width}×${canvas.height}`
     frames = 0
     fpsWindowStart = now

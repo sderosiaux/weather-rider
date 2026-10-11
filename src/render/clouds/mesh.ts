@@ -22,7 +22,8 @@ export interface CloudLayer {
   dispose(): void
 }
 
-export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Texture): CloudLayer {
+/** `occluderDistance`: half-res camera distance (km) of the ground, see CloudPass. */
+export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Texture, occluderDistance: THREE.Texture): CloudLayer {
   const quad = new THREE.PlaneGeometry(1, 1)
   const geometry = new THREE.InstancedBufferGeometry()
   geometry.index = quad.index
@@ -42,6 +43,7 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
       uShadowColor: { value: PALETTE.cloudShadow.clone() },
       uAmbient: { value: PALETTE.cloudAmbient.clone() },
       uDepthRange: { value: DEPTH_RANGE },
+      uOccluder: { value: occluderDistance },
     },
     vertexShader: /* glsl */ `
       ${ATMOSPHERE_GLSL}
@@ -133,6 +135,7 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
       varying vec3 vRel;
       varying float vEdge;
       uniform vec3 uCamPos;
+      uniform sampler2D uOccluder;
 
       float hg(float mu, float g) {
         float g2 = g * g;
@@ -160,6 +163,10 @@ export function createCloudLayer(atmosphere: AtmosphereUniforms, atlas: THREE.Te
         float dist = length(vRel);
         float dirY = vRel.y / dist;
         if (dirY < 0.0 && dist > uCamPos.y / -dirY) discard;
+        // Ground in front (same half-res grid as this pass): fade out softly instead of slicing the puff.
+        float ground = texelFetch(uOccluder, ivec2(gl_FragCoord.xy), 0).r * 1000.0;
+        alpha *= smoothstep(0.0, max(120.0, dist * 0.03), ground - dist);
+        if (alpha < 0.004) discard;
 
         // Soft pseudo-normal: only a hint of per-puff roundness. Cluster-level shade carries the volume,
         // otherwise every puff reads as its own bubble.
