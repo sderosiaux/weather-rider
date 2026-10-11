@@ -42,6 +42,24 @@ describe('clipmap level', () => {
     }
   })
 
+  it('supersampled cover stores class shares that never exceed one', () => {
+    const level = createLevel({ texel: 100, size: 128, coverSamples: 2 })
+    bakeAll(level, 98_000, 0)
+    let mixed = 0
+    for (let z = -6_000; z < 6_000; z += 130) {
+      for (let x = 92_000; x < 104_000; x += 130) {
+        const got = texelAt(level, x, z)
+        const shares = [...got.t0, ...got.t1]
+        const sum = shares.reduce((a, b) => a + b, 0)
+        expect(sum).toBeLessThanOrEqual(1.01)
+        for (const v of shares) expect([0, 0.25, 0.5, 0.75, 1].some((q) => Math.abs(v - q) < 0.01)).toBe(true)
+        if (shares.some((v) => v > 0.01 && v < 0.99)) mixed++
+      }
+    }
+    // The arrival city's edge and the river banks fall inside texels: some shares are fractional.
+    expect(mixed).toBeGreaterThan(0)
+  })
+
   it('is valid only where baked, grows from the camera block, and never exceeds the window', () => {
     const level = createLevel({ texel: 50, size: 256 })
     const r = rect()

@@ -119,6 +119,16 @@ window.addEventListener('keydown', (e) => {
 const ghost = createFixtureGhost(3)
 view.setGhosts([{ ghost, spec: fixtureAircraft, color: '#ffc46b', showTrail: true }])
 
+// GPU A/B in one page (other GPU load drifts between page loads): window.__terrainVisible(false) hides the
+// ground (and shows the sea) without touching anything else, so gpuMs before/after is a same-conditions delta.
+;(window as unknown as { __terrainVisible: (on: boolean) => void }).__terrainVisible = (on) => {
+  for (const o of view.scene.children) {
+    if (o.renderOrder === -900) o.visible = (o as { isMesh?: boolean }).isMesh === true && 'uT0_0' in ((o as unknown as { material: { uniforms?: object } }).material.uniforms ?? {}) ? on : !on
+    if (o.type === 'Group' && o.children.some((c) => c.renderOrder === -890)) o.visible = on
+  }
+  gpuSamples.length = 0
+}
+
 const resize = (): void => view.resize(window.innerWidth, window.innerHeight)
 window.addEventListener('resize', resize)
 resize()
