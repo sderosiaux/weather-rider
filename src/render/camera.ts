@@ -28,6 +28,8 @@ const ROLL_FOLLOW = 0.25
 /** Horizon tilt cap (rad): a knife-edge pass must not flip the world. */
 const ROLL_MAX = 0.2
 const SNAP_DISTANCE = 3000
+/** Aim point height above the aircraft, in chase distances (0.6 before there was land to look at). */
+const AIM_ABOVE = 0.3
 
 export interface ChaseCamera {
   update(camera: THREE.PerspectiveCamera, state: AircraftState, spec: AircraftSpec | null, time: number, dt: number): void
@@ -87,9 +89,11 @@ export function createChaseCamera(): ChaseCamera {
       fov += (fovForSpeed(speed, cruise) - fov) * smoothing(1.2, dt)
 
       camera.position.copy(pos).add(offset)
-      // Aim past the aircraft and above it: the horizon sits low, the aircraft in the lower third, sky dominates.
+      // Aim past the aircraft and a little above it: the aircraft in the lower third, the horizon a bit
+      // below the middle. Sky still dominates, but the land going by underneath is in view: it is what
+      // tells the player how fast they are going.
       target.copy(pos).addScaledVector(dir, dist * 2)
-      target.y += dist * 0.6
+      target.y += dist * AIM_ABOVE
       camera.up.set(0, 1, 0)
       camera.lookAt(target)
       camera.rotateZ(-roll)
