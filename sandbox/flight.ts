@@ -1,12 +1,14 @@
-// Flight lab: fly any aircraft by keyboard through the fixture weather, watch the physics.
+// Flight lab: fly any aircraft by keyboard through the fixture weather over the fixture terrain, watch the physics.
 import { SIM_DT } from '../src/core/constants'
-import { createFixtureWeather, fixtureRoute } from '../src/core/fixtures'
+import { createFixtureTerrain, createFixtureWeather, fixtureRoute } from '../src/core/fixtures'
 import { v3 } from '../src/core/math'
-import type { AircraftSpec, AircraftState, Controls, MutableWeatherSample, Route } from '../src/core/types'
+import type { AircraftSpec, AircraftState, Controls, FlightEnv, MutableWeatherSample, Route } from '../src/core/types'
 import { AIRCRAFT, aircraftById, bankAngle, flightModel, headingOf } from '../src/flight'
 
 const weather = createFixtureWeather(1)
 const route: Route = fixtureRoute
+const terrain = createFixtureTerrain(1)
+let env: FlightEnv = { weather, route, terrain }
 const X0 = -10_000
 const X1 = 110_000
 const Y1 = 14_000
@@ -63,9 +65,11 @@ function reset(): void {
     updraft: v3(20_000, 3000, 0),
     jet: v3(40_000, 8500, 0),
     downdraft: v3(45_000, 3000, 4000),
+    ridge: v3(45_000, 1800, 0),
   }
   const pos = starts[scenarioSel.value] ?? route.start
-  state = flightModel.initialState(spec, { ...route, start: pos }, weather)
+  env = { weather, route: { ...route, start: pos }, terrain }
+  state = flightModel.initialState(spec, env)
   controls = { pitch: 0, roll: 0, yaw: 0, throttle: state.throttle }
   trace = []
   history = []
@@ -176,6 +180,7 @@ function drawSide(): void {
   ctx.imageSmoothingEnabled = true
   ctx.drawImage(sideBg, 0, 0, w, h)
   grid(ctx, w, h, px, py, 2000)
+  drawGround(ctx, w, h, px, py)
   // Gate window
   ctx.fillStyle = color('gate') + '33'
   ctx.strokeStyle = color('gate')
@@ -187,6 +192,29 @@ function drawSide(): void {
   line(ctx, trace.map((p) => [px(p.x), py(p.y)]), color('trace'), 1.5)
   // Aircraft: nose direction from ground velocity, exaggerated 5× vertically for readability
   marker(ctx, px(state.pos.x), py(state.pos.y), Math.atan2(-state.vel.y * 5, state.vel.x))
+}
+
+/** Ground profile under the aircraft's z slice; open water (sea, below 0) shown as its surface. */
+function drawGround(ctx: CanvasRenderingContext2D, w: number, h: number, px: (x: number) => number, py: (y: number) => number): void {
+  const n = Math.ceil(w / 2)
+  const xs = Array.from({ length: n + 1 }, (_, i) => X0 + (i / n) * (X1 - X0))
+  const hs = xs.map((x) => terrain.heightAt(x, state.pos.z))
+  ctx.fillStyle = color('ground')
+  ctx.beginPath()
+  ctx.moveTo(0, h)
+  xs.forEach((x, i) => ctx.lineTo(px(x), py(Math.max(hs[i]!, 0))))
+  ctx.lineTo(w, h)
+  ctx.closePath()
+  ctx.fill()
+  ctx.strokeStyle = color('water')
+  ctx.lineWidth = 3
+  ctx.beginPath()
+  xs.forEach((x, i) => {
+    if (hs[i]! >= 0) return
+    if (i === 0 || hs[i - 1]! >= 0) ctx.moveTo(px(x), py(0) - 1.5)
+    else ctx.lineTo(px(x), py(0) - 1.5)
+  })
+  ctx.stroke()
 }
 
 function drawTop(): void {
@@ -328,6 +356,7 @@ function drawReadout(): void {
     ['t', `${s.t.toFixed(1)} s`],
     ['pos x / z', `${(s.pos.x / 1000).toFixed(1)} / ${(s.pos.z / 1000).toFixed(1)} km`],
     ['altitude', `${s.pos.y.toFixed(0)} m`],
+    ['ground / AGL', `${terrain.heightAt(s.pos.x, s.pos.z).toFixed(0)} / ${(s.pos.y - Math.max(terrain.heightAt(s.pos.x, s.pos.z), 0)).toFixed(0)} m`],
     ['vertical speed', `${s.vel.y.toFixed(1)} m/s`],
     ['airspeed', `${s.airspeed.toFixed(1)} m/s`],
     ['ground speed', `${ground.toFixed(1)} m/s (${(ground * 3.6).toFixed(0)} km/h)`],
@@ -357,7 +386,7 @@ function frame(now: number): void {
     let steps = 0
     while (acc >= SIM_DT && steps < 64) {
       controls = readControls(SIM_DT)
-      state = flightModel.step(spec, state, controls, weather, route, SIM_DT)
+      state = flightModel.step(spec, state, controls, env, SIM_DT)
       acc -= SIM_DT
       steps++
       if (state.t >= nextTrace) {

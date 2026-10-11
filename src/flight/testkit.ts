@@ -1,7 +1,7 @@
 // Test/sandbox helpers: uniform weather fields and a fixed-step runner.
 import { SIM_DT } from '../core/constants'
 import { v3 } from '../core/math'
-import type { AircraftSpec, AircraftState, Controls, MutableWeatherSample, Route, Vec3, WeatherField, WeatherSample } from '../core/types'
+import type { AircraftSpec, AircraftState, Controls, FlightEnv, MutableWeatherSample, Vec3, WeatherField, WeatherSample } from '../core/types'
 import { flightModel } from './model'
 
 /** Uniform air mass: constant wind and turbulence everywhere. */
@@ -28,15 +28,14 @@ export function fly(
   spec: AircraftSpec,
   start: AircraftState,
   pilot: Pilot,
-  weather: WeatherField,
-  route: Route,
+  env: FlightEnv,
   seconds: number,
   onStep?: (s: AircraftState) => void,
 ): AircraftState {
   let s = start
   const n = Math.round(seconds / SIM_DT)
   for (let i = 0; i < n && s.status === 'flying'; i++) {
-    s = flightModel.step(spec, s, pilot(s), weather, route, SIM_DT)
+    s = flightModel.step(spec, s, pilot(s), env, SIM_DT)
     onStep?.(s)
   }
   return s
