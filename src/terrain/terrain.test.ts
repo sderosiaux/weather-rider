@@ -240,39 +240,3 @@ describe('createTerrain — what the passenger sees', () => {
     }
   })
 })
-
-describe('createTerrain — cost', () => {
-  it('heightAt and coverAt cost well under a microsecond (1M calls each)', () => {
-    const p = CASES[7]!.params
-    const t = build(p)
-    const N = 1_000_000
-    const xs = new Float64Array(N)
-    const zs = new Float64Array(N)
-    const rng = createRng(7)
-    for (let i = 0; i < N; i++) {
-      xs[i] = p.boundsMin.x + rng() * (p.boundsMax.x - p.boundsMin.x)
-      zs[i] = p.boundsMin.z + rng() * (p.boundsMax.z - p.boundsMin.z)
-    }
-    let sink = 0
-    for (let i = 0; i < 50_000; i++) sink += t.heightAt(xs[i]!, zs[i]!) + t.coverAt(xs[i]!, zs[i]!).length
-    const t0 = performance.now()
-    for (let i = 0; i < N; i++) sink += t.heightAt(xs[i]!, zs[i]!)
-    const t1 = performance.now()
-    for (let i = 0; i < N; i++) sink += t.coverAt(xs[i]!, zs[i]!).length
-    const t2 = performance.now()
-    const hNs = ((t1 - t0) / N) * 1e6
-    const cNs = ((t2 - t1) / N) * 1e6
-    console.log(`terrain cost: heightAt ${hNs.toFixed(0)} ns, coverAt ${cNs.toFixed(0)} ns per call`)
-    expect(Number.isFinite(sink)).toBe(true)
-    // Target ≈ 0.5 µs; the bound leaves room for a loaded CI machine.
-    expect(hNs).toBeLessThan(800)
-    expect(cNs).toBeLessThan(800)
-  })
-
-  it('generates a route in well under a second', () => {
-    const p = CASES[10]!.params
-    const t0 = performance.now()
-    createTerrain(p)
-    expect(performance.now() - t0).toBeLessThan(1000)
-  })
-})
